@@ -1,0 +1,61 @@
+{
+    "name": "eyes-react",
+    "version": "0.1.0",
+    "description": "Eyes Analytics — React provider and hook",
+    "author": "Pixel Perfect Agency",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/pixel-perfect-agency/eyes",
+        "directory": "packages/eyes-react"
+    },
+    "keywords": [
+        "analytics",
+        "react",
+        "tracking",
+        "provider",
+        "hook"
+    ],
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.mts",
+    "exports": {
+        ".": {
+            "types": {
+                "import": "./dist/index.d.mts",
+                "require": "./dist/index.d.cts"
+            },
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.cjs"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsdown",
+        "prepublishOnly": "pnpm run build",
+        "dev": "tsdown --watch",
+        "lint": "biome check src tsconfig.json tsdown.config.ts",
+        "lint:fix": "biome check --write src tsconfig.json tsdown.config.ts",
+        "type-check": "tsc --noEmit"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "dependencies": {
+        "@eyes/types": "workspace:*"
+    },
+    "peerDependencies": {
+        "react": ">=18"
+    },
+    "devDependencies": {
+        "@eyes/typescript-config": "workspace:*",
+        "@types/react": "19.2.14",
+        "react": "19.2.5",
+        "tsdown": "^0.21.8",
+        "typescript": "^6.0.3"
+    }
+}

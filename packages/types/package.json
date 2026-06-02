@@ -1,0 +1,49 @@
+{
+    "name": "@eyes/types",
+    "version": "0.1.0",
+    "description": "Eyes Analytics — shared TypeScript types",
+    "author": "Pixel Perfect Agency",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/pixel-perfect-agency/eyes",
+        "directory": "packages/types"
+    },
+    "keywords": [
+        "analytics",
+        "types",
+        "typescript"
+    ],
+    "type": "module",
+    "types": "./dist/index.d.mts",
+    "exports": {
+        ".": {
+            "types": {
+                "import": "./dist/index.d.mts",
+                "require": "./dist/index.d.cts"
+            },
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.cjs"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsdown",
+        "prepublishOnly": "pnpm run build",
+        "dev": "tsdown --watch",
+        "lint": "biome check src tsconfig.json tsdown.config.ts",
+        "lint:fix": "biome check --write src tsconfig.json tsdown.config.ts",
+        "type-check": "tsc --noEmit"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "devDependencies": {
+        "@eyes/typescript-config": "workspace:*",
+        "tsdown": "^0.21.8",
+        "typescript": "^6.0.3"
+    }
+}

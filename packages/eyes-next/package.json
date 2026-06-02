@@ -1,0 +1,71 @@
+{
+    "name": "eyes-next",
+    "version": "0.1.0",
+    "description": "Eyes Analytics — Next.js integration with automatic proxying",
+    "author": "Pixel Perfect Agency",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/pixel-perfect-agency/eyes",
+        "directory": "packages/eyes-next"
+    },
+    "keywords": [
+        "analytics",
+        "nextjs",
+        "next",
+        "tracking",
+        "proxy"
+    ],
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.mts",
+    "exports": {
+        ".": {
+            "types": {
+                "import": "./dist/index.d.mts",
+                "require": "./dist/index.d.cts"
+            },
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.cjs"
+        },
+        "./config": {
+            "types": {
+                "import": "./dist/config.d.mts",
+                "require": "./dist/config.d.cts"
+            },
+            "import": "./dist/config.mjs",
+            "require": "./dist/config.cjs"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsdown",
+        "prepublishOnly": "pnpm run build",
+        "dev": "tsdown --watch",
+        "lint": "biome check src tsconfig.json tsdown.config.ts",
+        "lint:fix": "biome check --write src tsconfig.json tsdown.config.ts",
+        "type-check": "tsc --noEmit"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "dependencies": {
+        "eyes-react": "workspace:*"
+    },
+    "peerDependencies": {
+        "next": ">=14",
+        "react": ">=18"
+    },
+    "devDependencies": {
+        "@eyes/typescript-config": "workspace:*",
+        "@types/react": "19.2.14",
+        "next": "16.2.6",
+        "react": "19.2.5",
+        "tsdown": "^0.21.8",
+        "typescript": "^6.0.3"
+    }
+}
