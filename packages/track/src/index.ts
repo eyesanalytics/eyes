@@ -1,4 +1,4 @@
-import type { EyesConfig, EyesContract, IdentifyTraits, Props } from '@eyes/types';
+import type { EyesConfig, EyesContract, IdentifyTraits, Props } from 'eyes-types';
 import { EyesTracker } from '~/core';
 import { isBrowser } from '~/utils/is-browser';
 
@@ -112,5 +112,5 @@ export type {
     IdentifyTraits,
     Props,
     PropValue,
-} from '@eyes/types';
+} from 'eyes-types';
 export { consent, flush, identify, init, page, revokeConsent, shutdown, track };

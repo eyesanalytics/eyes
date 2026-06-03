@@ -24,6 +24,9 @@ importers:
       '@eyes/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@types/node':
+        specifier: 25.5.0
+        version: 25.5.0
       '@types/react':
         specifier: 19.2.14
         version: 19.2.14
@@ -42,7 +45,7 @@ importers:
 
   packages/eyes-react:
     dependencies:
-      '@eyes/types':
+      eyes-types:
         specifier: workspace:*
         version: link:../types
     devDependencies:
@@ -64,7 +67,7 @@ importers:
 
   packages/track:
     dependencies:
-      '@eyes/types':
+      eyes-types:
         specifier: workspace:*
         version: link:../types
     devDependencies:

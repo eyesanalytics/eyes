@@ -1,6 +1,6 @@
 {
-    "name": "@eyes/types",
-    "version": "0.1.0",
+    "name": "eyes-types",
+    "version": "0.1.1",
     "description": "Eyes Analytics — shared TypeScript types",
     "author": "Pixel Perfect Agency",
     "license": "MIT",

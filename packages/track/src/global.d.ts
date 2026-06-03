@@ -1,4 +1,4 @@
-import type { EyesConfig, EyesContract, IdentifyTraits } from '@eyes/types';
+import type { EyesConfig, EyesContract, IdentifyTraits } from 'eyes-types';
 
 declare global {
     interface Window {

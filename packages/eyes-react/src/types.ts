@@ -1,9 +1,12 @@
-import type { BeforeSendHook, EyesConfig } from '@eyes/types';
+import type { BeforeSendHook, EyesConfig } from 'eyes-types';
 
 /** Options passed to `EyesProvider` / `EyesNextProvider` (script-tag integration). */
 export interface EyesProviderProps {
-    /** Ingress endpoint URL or proxy path (e.g. "/api/eyes" or "https://ingress.eyes.dev"). */
-    endpoint: string;
+    /**
+     * Ingress endpoint URL or proxy path (e.g. "/api/eyes" or "https://ingress.eyes.dev").
+     * @default "https://ingress.eyes.dev"
+     */
+    endpoint?: string;
 
     /**
      * URL to load the tracker script from.

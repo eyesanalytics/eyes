@@ -1,4 +1,4 @@
-import type { EyesEvent } from '@eyes/types';
+import type { EyesEvent } from 'eyes-types';
 import type { EyesTracker } from '~/core';
 import { getSessionId } from '~/session';
 import type { Logger } from '~/utils/logger';

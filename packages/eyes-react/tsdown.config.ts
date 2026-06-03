@@ -7,6 +7,6 @@ export default defineConfig({
     sourcemap: false,
     clean: true,
     deps: {
-        neverBundle: ['react', 'react/jsx-runtime', '@eyes/types'],
+        neverBundle: ['react', 'react/jsx-runtime', 'eyes-types'],
     },
 });

@@ -1,4 +1,4 @@
-import type { EyesConfig, EyesEvent } from '@eyes/types';
+import type { EyesConfig, EyesEvent } from 'eyes-types';
 import { describe, expect, it } from 'vitest';
 import { resolveConfig } from '~/config';
 

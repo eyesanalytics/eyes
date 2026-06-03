@@ -1,4 +1,4 @@
-import type { EyesConfig, ResolvedConfig } from '@eyes/types';
+import type { EyesConfig, ResolvedConfig } from 'eyes-types';
 
 const DEFAULTS: Omit<ResolvedConfig, 'endpoint'> = {
     debug: false,

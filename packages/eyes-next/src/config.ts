@@ -1,7 +1,13 @@
-export interface EyesNextOptions {
-    /** The ingress URL where events are forwarded to (e.g. "https://ingress.eyes.dev"). */
-    ingressUrl: string;
+const DEFAULT_INGRESS_URL = 'https://ingress.eyes.dev';
 
+/** Ingress rewrite target — override with `EYES_INGRESS_URL` for local dev (e.g. `http://127.0.0.1:3002`). */
+const resolveIngressUrl = (): string => {
+    const envUrl = process.env.EYES_INGRESS_URL?.trim();
+    const url = envUrl ? envUrl : DEFAULT_INGRESS_URL;
+    return url.replace(/\/+$/, '');
+};
+
+export interface EyesNextOptions {
     /**
      * URL of the tracker script.
      * @default "https://cdn.eyes.dev/v1/eyes.js"
@@ -22,7 +28,7 @@ const DEFAULT_BASE_PATH = '/api/eyes';
  *
  * This adds rewrites so that:
  * - `{basePath}/eyes.js` → CDN-hosted tracker script
- * - `{basePath}/v1/:path*` → your ingress URL
+ * - `{basePath}/v1/:path*` → `https://ingress.eyes.dev` (or `EYES_INGRESS_URL` when set)
  *
  * This keeps all analytics traffic on the same origin, avoiding ad blockers.
  *
@@ -31,21 +37,18 @@ const DEFAULT_BASE_PATH = '/api/eyes';
  * // next.config.ts
  * import { withEyes } from 'eyes-next';
  *
- * export default withEyes(nextConfig, {
- *   ingressUrl: 'https://ingress.eyes.dev',
- * });
+ * export default withEyes(nextConfig);
  * ```
  */
 export const withEyes = <NextConfig>(
     nextConfig: NextConfig,
-    options: EyesNextOptions,
+    options: EyesNextOptions = {},
 ): NextConfig => {
-    const { ingressUrl, basePath = DEFAULT_BASE_PATH } = options;
+    const { basePath = DEFAULT_BASE_PATH } = options;
 
-    // Normalize: strip trailing slashes
     const base = basePath.replace(/\/+$/, '');
-    const ingress = ingressUrl.replace(/\/+$/, '');
     const scriptUrl = options.scriptUrl ?? 'https://cdn.eyes.dev/v1/eyes.js';
+    const ingressUrl = resolveIngressUrl();
 
     const eyesRewrites = [
         {
@@ -54,7 +57,7 @@ export const withEyes = <NextConfig>(
         },
         {
             source: `${base}/v1/:path*`,
-            destination: `${ingress}/v1/:path*`,
+            destination: `${ingressUrl}/v1/:path*`,
         },
     ];
 

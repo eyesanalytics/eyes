@@ -1,4 +1,4 @@
-import type { EyesEvent } from '@eyes/types';
+import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // We need to reset the singleton between tests, so we import via dynamic import

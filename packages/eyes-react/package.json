@@ -1,14 +1,9 @@
 {
     "name": "eyes-react",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Eyes Analytics — React provider and hook",
     "author": "Pixel Perfect Agency",
     "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/pixel-perfect-agency/eyes",
-        "directory": "packages/eyes-react"
-    },
     "keywords": [
         "analytics",
         "react",
@@ -46,7 +41,7 @@
         "access": "public"
     },
     "dependencies": {
-        "@eyes/types": "workspace:*"
+        "eyes-types": "workspace:*"
     },
     "peerDependencies": {
         "react": ">=18"

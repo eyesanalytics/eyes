@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from '@eyes/types';
+import type { ResolvedConfig } from 'eyes-types';
 import type { EyesTracker } from '~/core';
 
 interface PrerenderingDocument extends Document {

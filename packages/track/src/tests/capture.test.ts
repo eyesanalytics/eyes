@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from '@eyes/types';
+import type { ResolvedConfig } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initCapture } from '~/capture';
 import type { EyesTracker } from '~/core';

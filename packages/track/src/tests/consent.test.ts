@@ -1,4 +1,4 @@
-import type { EyesEvent } from '@eyes/types';
+import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const readEyesId = (): string | null => {

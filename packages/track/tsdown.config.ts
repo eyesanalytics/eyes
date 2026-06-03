@@ -9,7 +9,7 @@ export default defineConfig([
         sourcemap: false,
         clean: true,
         deps: {
-            neverBundle: ['@eyes/types'],
+            neverBundle: ['eyes-types'],
         },
     },
     // IIFE for <script> tag usage → window.Eyes

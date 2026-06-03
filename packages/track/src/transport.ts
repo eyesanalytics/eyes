@@ -1,4 +1,4 @@
-import type { EyesEvent, ResolvedConfig } from '@eyes/types';
+import type { EyesEvent, ResolvedConfig } from 'eyes-types';
 import { isBot } from '~/utils/is-bot';
 import type { Logger } from '~/utils/logger';
 

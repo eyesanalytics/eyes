@@ -1,4 +1,4 @@
-import type { EyesConfig, EyesEvent, IdentifyTraits, Props, ResolvedConfig } from '@eyes/types';
+import type { EyesConfig, EyesEvent, IdentifyTraits, Props, ResolvedConfig } from 'eyes-types';
 import { initCapture } from '~/capture';
 import { resolveConfig } from '~/config';
 import { type ConsentManager, createConsentManager } from '~/consent';

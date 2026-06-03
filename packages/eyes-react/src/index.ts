@@ -5,7 +5,7 @@ export type {
     EyesEvent,
     IdentifyTraits,
     Props,
-} from '@eyes/types';
+} from 'eyes-types';
 export type { TypedEyesContextValue, TypedTrack } from '~/create';
 export { createEyes } from '~/create';
 export { useEyes } from '~/hook';

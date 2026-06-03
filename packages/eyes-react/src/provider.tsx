@@ -1,14 +1,15 @@
 'use client';
 
-import type { EyesConfig } from '@eyes/types';
+import type { EyesConfig } from 'eyes-types';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { EyesContext } from '~/context';
 import type { EyesContextValue, EyesProviderProps } from '~/types';
 
+const DEFAULT_INGRESS_URL = 'https://ingress.eyes.dev';
 const DEFAULT_SCRIPT_URL = 'https://cdn.eyes.dev/v1/eyes.js';
 
 export const EyesProvider = ({
-    endpoint,
+    endpoint = DEFAULT_INGRESS_URL,
     scriptUrl = DEFAULT_SCRIPT_URL,
     autoPageview,
     autoOutbound,
