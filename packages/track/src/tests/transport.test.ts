@@ -1,6 +1,7 @@
 import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '~/config';
+import { TEST_SITE_ID, testEyesConfig } from '~/tests/helpers';
 import { createTransport } from '~/transport';
 
 const makeEvent = (overrides?: Partial<EyesEvent>): EyesEvent => ({
@@ -14,8 +15,7 @@ const makeEvent = (overrides?: Partial<EyesEvent>): EyesEvent => ({
 
 const noopLogger = { info: vi.fn(), event: vi.fn(), warn: vi.fn() };
 
-const makeConfig = (overrides = {}) =>
-    resolveConfig({ endpoint: 'https://analytics.example.com', ...overrides });
+const makeConfig = (overrides = {}) => resolveConfig(testEyesConfig(overrides));
 
 describe('transport', () => {
     let fetchSpy: ReturnType<typeof vi.fn>;
@@ -45,8 +45,9 @@ describe('transport', () => {
 
         expect(fetchSpy).toHaveBeenCalledOnce();
         const [url, options] = fetchSpy.mock.calls[0];
-        expect(url).toBe('https://analytics.example.com/v1/events');
+        expect(url).toBe('https://example.com/v1/events');
         expect(options.method).toBe('POST');
+        expect(options.headers['X-Eyes-Site-Id']).toBe(TEST_SITE_ID);
         expect(options.keepalive).toBe(true);
         expect(options.headers['Content-Type']).toBe('application/json');
 
@@ -98,7 +99,7 @@ describe('transport', () => {
         await transport.flush();
 
         expect(beaconSpy).toHaveBeenCalledOnce();
-        expect(beaconSpy.mock.calls[0][0]).toBe('https://analytics.example.com/v1/events');
+        expect(beaconSpy.mock.calls[0][0]).toBe('https://example.com/v1/events');
     });
 
     it('silently drops events when bot is detected', async () => {

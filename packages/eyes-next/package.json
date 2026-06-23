@@ -1,6 +1,6 @@
 {
     "name": "eyes-next",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "description": "Eyes Analytics — Next.js integration with automatic proxying",
     "author": "Pixel Perfect Agency",
     "license": "MIT",
@@ -59,7 +59,7 @@
         "@eyes/typescript-config": "workspace:*",
         "@types/node": "25.5.0",
         "@types/react": "19.2.14",
-        "next": "16.2.6",
+        "next": "16.2.7",
         "react": "19.2.5",
         "tsdown": "^0.21.8",
         "typescript": "^6.0.3"

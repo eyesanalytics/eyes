@@ -5,6 +5,7 @@ import type { EyesTracker } from '~/core';
 
 const makeConfig = (overrides?: Partial<ResolvedConfig>): ResolvedConfig => ({
     endpoint: 'https://example.com',
+    siteId: '1000000001',
     debug: false,
     autoPageview: true,
     autoOutbound: true,

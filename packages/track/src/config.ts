@@ -1,6 +1,9 @@
 import type { EyesConfig, ResolvedConfig } from 'eyes-types';
 
-const DEFAULTS: Omit<ResolvedConfig, 'endpoint'> = {
+const DEFAULT_ENDPOINT = 'https://ingress.eyes.dev';
+
+const DEFAULTS: Omit<ResolvedConfig, 'siteId'> = {
+    endpoint: DEFAULT_ENDPOINT,
     debug: false,
     consentRequired: true,
     autoPageview: true,
@@ -13,15 +16,17 @@ const DEFAULTS: Omit<ResolvedConfig, 'endpoint'> = {
 
 /**
  * Merge user-provided config with sensible defaults.
- * Throws if `endpoint` is missing.
  */
 const resolveConfig = (input: EyesConfig): ResolvedConfig => {
-    if (!input.endpoint) {
-        throw new Error('[Eyes] `endpoint` is required');
+    if (!input.siteId) {
+        throw new Error('[Eyes] `siteId` is required');
     }
 
-    // Strip trailing slash from endpoint
-    const endpoint = input.endpoint.replace(/\/+$/, '');
+    if (!/^\d{9}$/.test(input.siteId)) {
+        throw new Error('[Eyes] `siteId` must be a 9-digit numeric string');
+    }
+
+    const endpoint = (input.endpoint?.trim() || DEFAULTS.endpoint).replace(/\/+$/, '');
 
     return {
         ...DEFAULTS,
@@ -32,4 +37,4 @@ const resolveConfig = (input: EyesConfig): ResolvedConfig => {
     };
 };
 
-export { resolveConfig };
+export { DEFAULT_ENDPOINT, resolveConfig };

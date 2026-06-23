@@ -89,10 +89,17 @@ export type BeforeSendHook = (event: EyesEvent) => EyesEvent | null;
 // Configuration
 // ---------------------------------------------------------------------------
 export interface EyesConfig {
-    /** Analytics endpoint base URL (required). */
-    endpoint: string;
+    /** Public site tracking ID (9-digit numeric string). Only required field. */
+    siteId: string;
 
-    /** Enable console debug logging with styled output. */
+    /**
+     * Ingress base URL. You almost never need to set this.
+     * Override only for self-hosting or if you really need to proxy to a different origin.
+     * @default "https://ingress.eyes.dev"
+     */
+    endpoint?: string;
+
+    /** Enable console debug logging. */
     debug?: boolean;
 
     /**
@@ -128,6 +135,7 @@ export interface EyesConfig {
 /** Internal resolved config — all optional fields filled with defaults. */
 export interface ResolvedConfig {
     endpoint: string;
+    siteId: string;
     debug: boolean;
     consentRequired: boolean;
     cookieDomain?: string;

@@ -43,7 +43,10 @@ const createTransport = (config: ResolvedConfig, logger: Logger): Transport => {
             try {
                 await fetch(url, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Eyes-Site-Id': config.siteId,
+                    },
                     body,
                     keepalive: true,
                 });

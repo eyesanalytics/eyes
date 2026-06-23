@@ -1,8 +1,8 @@
 import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveConfig } from '~/config';
 import type { EyesTracker } from '~/core';
 import { initEngagement } from '~/engagement';
+import { TEST_SITE_ID, testEyesConfig } from '~/tests/helpers';
 
 const noopLogger = { info: vi.fn(), event: vi.fn(), warn: vi.fn() };
 
@@ -16,7 +16,7 @@ const makeTracker = () => {
         send: vi.fn((e: EyesEvent) => sent.push(e)),
         currentUrl: vi.fn(() => location.href),
         track: vi.fn(),
-        config: resolveConfig({ endpoint: 'https://test.com' }),
+        config: testEyesConfig({ endpoint: 'https://test.com', siteId: TEST_SITE_ID }),
         _sent: sent,
     };
 };

@@ -2,8 +2,12 @@ import type { BeforeSendHook, EyesConfig } from 'eyes-types';
 
 /** Options passed to `EyesProvider` / `EyesNextProvider` (script-tag integration). */
 export interface EyesProviderProps {
+    /** Public site tracking ID (9-digit numeric string). */
+    siteId: string;
+
     /**
-     * Ingress endpoint URL or proxy path (e.g. "/api/eyes" or "https://ingress.eyes.dev").
+     * Ingress endpoint URL or same-origin proxy path. You almost never need to set this.
+     * Override for self-hosting or if you really need to proxy to a different origin.
      * @default "https://ingress.eyes.dev"
      */
     endpoint?: string;
@@ -42,6 +46,7 @@ export interface EyesProviderProps {
 export type EyesProviderConfig = Pick<
     EyesConfig,
     | 'endpoint'
+    | 'siteId'
     | 'autoPageview'
     | 'autoOutbound'
     | 'hashRouting'

@@ -7,9 +7,9 @@ import type { EyesContextValue, EyesProviderProps } from '~/types';
 
 const DEFAULT_INGRESS_URL = 'https://ingress.eyes.dev';
 const DEFAULT_SCRIPT_URL = 'https://cdn.eyes.dev/v1/eyes.js';
-
 export const EyesProvider = ({
     endpoint = DEFAULT_INGRESS_URL,
+    siteId,
     scriptUrl = DEFAULT_SCRIPT_URL,
     autoPageview,
     autoOutbound,
@@ -20,9 +20,9 @@ export const EyesProvider = ({
     children,
 }: EyesProviderProps) => {
     const initCalled = useRef(false);
-    const configRef = useRef<EyesConfig>({ endpoint });
+    const configRef = useRef<EyesConfig>({ siteId });
 
-    configRef.current = { endpoint };
+    if (endpoint !== undefined) configRef.current.endpoint = endpoint;
     if (autoPageview !== undefined) configRef.current.autoPageview = autoPageview;
     if (autoOutbound !== undefined) configRef.current.autoOutbound = autoOutbound;
     if (hashRouting !== undefined) configRef.current.hashRouting = hashRouting;

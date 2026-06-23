@@ -2,6 +2,7 @@ import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '~/config';
 import type { EyesTracker } from '~/core';
+import { TEST_SITE_ID } from '~/tests/helpers';
 import { initVitals } from '~/vitals';
 
 const noopLogger = { info: vi.fn(), event: vi.fn(), warn: vi.fn() };
@@ -11,7 +12,7 @@ const makeTracker = () => ({
     currentUrl: vi.fn(() => 'https://example.com/page'),
     page: vi.fn(),
     track: vi.fn(),
-    config: resolveConfig({ endpoint: 'https://test.com' }),
+    config: resolveConfig({ endpoint: 'https://test.com', siteId: TEST_SITE_ID }),
 });
 
 // EyesTracker has private members, so mock objects can't structurally match it

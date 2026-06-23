@@ -26,7 +26,10 @@ class EyesTracker {
             this.config.cookieDomain,
         );
 
-        this.logger.info('Initialising', { endpoint: this.config.endpoint });
+        this.logger.info('Initialising', {
+            siteId: this.config.siteId,
+            endpoint: this.config.endpoint,
+        });
 
         // Start transport auto-flush
         this.transport.start();

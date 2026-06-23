@@ -45,10 +45,7 @@ const NOOP_API: EyesContract = {
  * ```ts
  * import { init } from '@eyes/track';
  *
- * const eyes = init({
- *   endpoint: 'https://analytics.example.com',
- *   debug: true,
- * });
+ * const eyes = init({ siteId: '123456789' });
  *
  * eyes.track('Signup Completed', { plan: 'pro' });
  * ```

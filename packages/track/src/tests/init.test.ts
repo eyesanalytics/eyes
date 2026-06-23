@@ -1,5 +1,6 @@
 import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testEyesConfig } from '~/tests/helpers';
 
 // We need to reset the singleton between tests, so we import via dynamic import
 // after resetting modules each time.
@@ -36,7 +37,7 @@ describe('init (integration)', () => {
 
     it('returns a working API with track, page, flush, shutdown', async () => {
         const { init } = await importModule();
-        const api = init({ endpoint: 'https://example.com' });
+        const api = init(testEyesConfig());
 
         expect(api).toHaveProperty('track');
         expect(api).toHaveProperty('page');
@@ -50,7 +51,9 @@ describe('init (integration)', () => {
 
     it('track → flush sends events via fetch', async () => {
         const { init } = await importModule();
-        const api = init({ endpoint: 'https://analytics.test', autoPageview: false });
+        const api = init(
+            testEyesConfig({ endpoint: 'https://analytics.test', autoPageview: false }),
+        );
 
         api.track('Signup', { plan: 'pro' });
         await api.flush();
@@ -60,7 +63,7 @@ describe('init (integration)', () => {
         expect(url).toBe('https://analytics.test/v1/events');
 
         const body: EyesEvent[] = JSON.parse(options.body);
-        const signupEvent = body.find(e => e.name === 'Signup');
+        const signupEvent = body.find(event => event.name === 'Signup');
         expect(signupEvent).toBeDefined();
         expect(signupEvent?.type).toBe('event');
         expect(signupEvent?.props).toEqual({ plan: 'pro' });
@@ -71,8 +74,8 @@ describe('init (integration)', () => {
     it('calling init twice returns the same instance', async () => {
         const { init } = await importModule();
 
-        const first = init({ endpoint: 'https://example.com', autoPageview: false });
-        const second = init({ endpoint: 'https://example.com', autoPageview: false });
+        const first = init(testEyesConfig({ autoPageview: false }));
+        const second = init(testEyesConfig({ autoPageview: false }));
 
         // They should behave as the same tracker (shared queue)
         first.track('event-from-first');
@@ -90,14 +93,15 @@ describe('init (integration)', () => {
 
     it('beforeSend can modify events', async () => {
         const { init } = await importModule();
-        const api = init({
-            endpoint: 'https://example.com',
-            autoPageview: false,
-            beforeSend: event => ({
-                ...event,
-                props: { ...event.props, injected: true },
+        const api = init(
+            testEyesConfig({
+                autoPageview: false,
+                beforeSend: event => ({
+                    ...event,
+                    props: { ...event.props, injected: true },
+                }),
             }),
-        });
+        );
 
         api.track('Test');
         await api.flush();
@@ -110,11 +114,12 @@ describe('init (integration)', () => {
 
     it('beforeSend returning null drops events', async () => {
         const { init } = await importModule();
-        const api = init({
-            endpoint: 'https://example.com',
-            autoPageview: false,
-            beforeSend: () => null,
-        });
+        const api = init(
+            testEyesConfig({
+                autoPageview: false,
+                beforeSend: () => null,
+            }),
+        );
 
         api.track('Dropped');
         await api.flush();
@@ -127,7 +132,7 @@ describe('init (integration)', () => {
 
     it('shutdown flushes remaining events', async () => {
         const { init } = await importModule();
-        const api = init({ endpoint: 'https://example.com', autoPageview: false });
+        const api = init(testEyesConfig({ autoPageview: false }));
 
         api.track('BeforeShutdown');
         await api.shutdown();
@@ -139,7 +144,7 @@ describe('init (integration)', () => {
 
     it('module-level track/page/flush work after init', async () => {
         const { init, track, flush, shutdown } = await importModule();
-        init({ endpoint: 'https://example.com', autoPageview: false });
+        init(testEyesConfig({ autoPageview: false }));
 
         track('ModuleLevel', { source: 'convenience' });
         await flush();
@@ -163,12 +168,12 @@ describe('init (integration)', () => {
 
     it('shutdown allows re-init', async () => {
         const mod = await importModule();
-        const api1 = mod.init({ endpoint: 'https://example.com', autoPageview: false });
+        const api1 = mod.init(testEyesConfig({ autoPageview: false }));
         await api1.shutdown();
 
         fetchSpy.mockClear();
 
-        const api2 = mod.init({ endpoint: 'https://example.com', autoPageview: false });
+        const api2 = mod.init(testEyesConfig({ autoPageview: false }));
         api2.track('AfterReInit');
         await api2.flush();
 

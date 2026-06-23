@@ -1,5 +1,6 @@
 import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testEyesConfig } from '~/tests/helpers';
 
 const readEyesId = (): string | null => {
     const match = document.cookie.match(/(?:^|; )eyes_id=([^;]+)/);
@@ -51,14 +52,14 @@ describe('consent', () => {
     describe('consentRequired: true (consent required)', () => {
         it('does not set eyes_id cookie before consent is granted', async () => {
             const { init } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true });
+            init(testEyesConfig({ consentRequired: true }));
 
             expect(readEyesId()).toBeNull();
         });
 
         it('events have no eyesId before consent is granted', async () => {
             const { init, track, flush } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true });
+            init(testEyesConfig({ consentRequired: true }));
 
             track('test_event');
             await flush();
@@ -71,7 +72,7 @@ describe('consent', () => {
 
         it('sets eyes_id cookie when consent is granted', async () => {
             const { init, consent } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true });
+            init(testEyesConfig({ consentRequired: true }));
 
             consent();
 
@@ -80,7 +81,7 @@ describe('consent', () => {
 
         it('attaches eyesId to events after consent is granted', async () => {
             const { init, consent, track, flush } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true, autoPageview: false });
+            init(testEyesConfig({ consentRequired: true, autoPageview: false }));
 
             consent();
             track('test_event');
@@ -97,7 +98,7 @@ describe('consent', () => {
     describe('revokeConsent', () => {
         it('removes the eyes_id cookie', async () => {
             const { init, consent, revokeConsent } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true });
+            init(testEyesConfig({ consentRequired: true }));
 
             consent();
             expect(readEyesId()).not.toBeNull();
@@ -108,7 +109,7 @@ describe('consent', () => {
 
         it('sends a consent_revoked event with the eyesId', async () => {
             const { init, consent, revokeConsent, flush } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true, autoPageview: false });
+            init(testEyesConfig({ consentRequired: true, autoPageview: false }));
 
             consent();
             const eyesId = readEyesId();
@@ -127,7 +128,7 @@ describe('consent', () => {
 
         it('events have no eyesId after consent is revoked', async () => {
             const { init, consent, revokeConsent, track, flush } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true });
+            init(testEyesConfig({ consentRequired: true }));
 
             consent();
             revokeConsent();
@@ -146,7 +147,7 @@ describe('consent', () => {
 
         it('identify() is dropped after consent is revoked', async () => {
             const { init, consent, revokeConsent, identify, flush } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: true });
+            init(testEyesConfig({ consentRequired: true }));
 
             consent();
             revokeConsent();
@@ -168,14 +169,14 @@ describe('consent', () => {
     describe('consentRequired: false (no consent required)', () => {
         it('sets eyes_id cookie immediately on init', async () => {
             const { init } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: false });
+            init(testEyesConfig({ consentRequired: false }));
 
             expect(readEyesId()).not.toBeNull();
         });
 
         it('attaches eyesId to events without explicit consent call', async () => {
             const { init, track, flush } = await importModule();
-            init({ endpoint: 'https://example.com', consentRequired: false });
+            init(testEyesConfig({ consentRequired: false }));
 
             track('test_event');
             await flush();
