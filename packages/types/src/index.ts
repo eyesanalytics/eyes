@@ -42,13 +42,17 @@ export interface EngagementEvent extends BaseEvent {
     activeTime?: number;
 }
 
+/** A single Core Web Vital measurement. */
+export interface VitalMetric {
+    name: string;
+    value: number;
+    rating: 'good' | 'needs-improvement' | 'poor';
+}
+
 export interface VitalsEvent extends BaseEvent {
     type: 'vitals';
-    metric: {
-        name: string;
-        value: number;
-        rating: 'good' | 'needs-improvement' | 'poor';
-    };
+    /** All metrics collected during the page lifecycle, sent as one event. */
+    metrics: VitalMetric[];
 }
 
 export interface IdentifyEvent extends BaseEvent {
@@ -132,7 +136,7 @@ export interface EyesConfig {
     beforeSend?: BeforeSendHook;
 }
 
-/** Internal resolved config — all optional fields filled with defaults. */
+/** Internal resolved config: all optional fields filled with defaults. */
 export interface ResolvedConfig {
     endpoint: string;
     siteId: string;
@@ -155,9 +159,9 @@ export interface EyesContract {
     track(name: string, props?: Props): void;
     /** Track a pageview. */
     page(props?: Props): void;
-    /** Grant consent — sets persistent eyes_id cookie, enables cross-session tracking. */
+    /** Grant consent: sets persistent eyes_id cookie, enables cross-session tracking. */
     consent(): void;
-    /** Revoke consent — removes eyes_id cookie, reverts to anonymous tracking. */
+    /** Revoke consent: removes eyes_id cookie, reverts to anonymous tracking. */
     revokeConsent(): void;
     /** Identify the current visitor with user traits. Requires consent. */
     identify(traits: IdentifyTraits): void;

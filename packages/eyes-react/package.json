@@ -1,7 +1,7 @@
 {
     "name": "eyes-react",
-    "version": "0.2.0",
-    "description": "Eyes Analytics — React provider and hook",
+    "version": "0.3.0",
+    "description": "Eyes Analytics: React provider and hook",
     "author": "Pixel Perfect Agency",
     "license": "MIT",
     "keywords": [
@@ -49,8 +49,8 @@
     "devDependencies": {
         "@eyes/typescript-config": "workspace:*",
         "@types/react": "19.2.14",
-        "react": "19.2.5",
+        "react": "19.2.8",
         "tsdown": "^0.21.8",
-        "typescript": "^6.0.3"
+        "typescript": "^7.0.2"
     }
 }

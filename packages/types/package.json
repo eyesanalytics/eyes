@@ -1,7 +1,7 @@
 {
     "name": "eyes-types",
-    "version": "0.2.0",
-    "description": "Eyes Analytics — shared TypeScript types",
+    "version": "0.3.0",
+    "description": "Eyes Analytics: shared TypeScript types",
     "author": "Pixel Perfect Agency",
     "license": "MIT",
     "repository": {
@@ -44,6 +44,6 @@
     "devDependencies": {
         "@eyes/typescript-config": "workspace:*",
         "tsdown": "^0.21.8",
-        "typescript": "^6.0.3"
+        "typescript": "^7.0.2"
     }
 }

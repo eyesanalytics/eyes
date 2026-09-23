@@ -2,6 +2,7 @@
     "extends": "@eyes/typescript-config/base.json",
     "compilerOptions": {
         "lib": ["ES2022"],
+        "isolatedDeclarations": true,
         "outDir": "./dist",
         "rootDir": "./src"
     },

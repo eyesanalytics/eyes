@@ -12,9 +12,9 @@ export default defineConfig([
             neverBundle: ['eyes-types'],
         },
     },
-    // IIFE for <script> tag usage → window.Eyes
+    // IIFE for <script> tag usage → window.Eyes (auto-inits from data-site)
     {
-        entry: ['src/index.ts'],
+        entry: { index: 'src/browser.ts' },
         format: ['iife'],
         globalName: 'Eyes',
         sourcemap: false,

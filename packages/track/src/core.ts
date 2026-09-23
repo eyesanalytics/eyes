@@ -83,13 +83,13 @@ class EyesTracker {
         this.transport.enqueue(result);
     };
 
-    /** Grant consent — sets eyes_id cookie, enables cross-session tracking. */
+    /** Grant consent: sets eyes_id cookie, enables cross-session tracking. */
     consent = (): void => {
         this.consentManager.grant();
         this.logger.info('Consent granted', { eyesId: this.consentManager.eyesId() });
     };
 
-    /** Revoke consent — removes cookie, sends consent_revoked event. */
+    /** Revoke consent: removes cookie, sends consent_revoked event. */
     revokeConsent = (): void => {
         const eyesId = this.consentManager.eyesId();
 
@@ -113,13 +113,13 @@ class EyesTracker {
     /** Identify the current visitor. Requires consent to be granted. */
     identify = (traits: IdentifyTraits): void => {
         if (this.consentManager.state() !== 'granted') {
-            this.logger.info('identify() dropped — consent not granted');
+            this.logger.info('identify() dropped: consent not granted');
             return;
         }
 
         const eyesId = this.consentManager.eyesId();
         if (!eyesId) {
-            this.logger.info('identify() dropped — no eyes_id');
+            this.logger.info('identify() dropped: no eyes_id');
             return;
         }
 

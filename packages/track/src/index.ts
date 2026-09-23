@@ -55,7 +55,7 @@ const init = (config: EyesConfig): EyesContract => {
 
     if (instance) {
         if (config.debug) {
-            console.warn('[Eyes] Already initialised — returning existing instance');
+            console.warn('[Eyes] Already initialised, returning existing instance');
         }
         return wrap(instance);
     }
@@ -74,12 +74,12 @@ const page = (props?: Props): void => {
     instance?.page(props);
 };
 
-/** Grant consent — sets persistent eyes_id cookie. */
+/** Grant consent: sets persistent eyes_id cookie. */
 const consent = (): void => {
     instance?.consent();
 };
 
-/** Revoke consent — removes eyes_id cookie, reverts to anonymous. */
+/** Revoke consent: removes eyes_id cookie, reverts to anonymous. */
 const revokeConsent = (): void => {
     instance?.revokeConsent();
 };

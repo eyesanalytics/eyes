@@ -11,6 +11,13 @@ export default defineConfig({
     },
     test: {
         environment: 'happy-dom',
+        environmentOptions: {
+            happyDOM: {
+                settings: {
+                    disableJavaScriptFileLoading: true,
+                },
+            },
+        },
         include: ['src/tests/**/*.test.ts'],
     },
 });

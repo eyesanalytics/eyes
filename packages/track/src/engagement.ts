@@ -6,7 +6,7 @@ import { throttle } from '~/utils/throttle';
 
 /**
  * Track per-pageview engagement metrics:
- * - **Scroll depth**: maximum scroll position as a percentage (0–100)
+ * - **Scroll depth**: maximum scroll position as a percentage (0-100)
  * - **Active time**: cumulative milliseconds the page was visible + focused
  *
  * Sends an `engagement` event on page hide or SPA navigation.

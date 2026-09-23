@@ -2,6 +2,7 @@
 
 import type { EyesProviderProps } from 'eyes-react';
 import { EyesProvider } from 'eyes-react';
+import type { ReactElement } from 'react';
 
 export interface EyesNextProviderProps extends Omit<EyesProviderProps, 'endpoint' | 'scriptUrl'> {
     /**
@@ -42,7 +43,7 @@ export const EyesNextProvider = ({
     endpoint,
     scriptUrl,
     ...props
-}: EyesNextProviderProps) => {
+}: EyesNextProviderProps): ReactElement => {
     const base = basePath.replace(/\/+$/, '');
 
     return (

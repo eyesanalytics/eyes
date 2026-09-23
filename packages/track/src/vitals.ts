@@ -1,4 +1,4 @@
-import type { EyesEvent } from 'eyes-types';
+import type { EyesEvent, VitalMetric } from 'eyes-types';
 import type { EyesTracker } from '~/core';
 import { getSessionId } from '~/session';
 import type { Logger } from '~/utils/logger';
@@ -18,6 +18,17 @@ const THRESHOLDS: Record<string, MetricThresholds> = {
     inp: { good: 200, poor: 500 },
 };
 
+// Values above these caps are broken measurements, not slow pages. A paint or
+// interaction whose presentation was deferred while the tab was hidden reports
+// a time measured from the original navigation, which can span hours or days.
+const MAX_VALUES: Record<string, number> = {
+    ttfb: 60_000,
+    fcp: 60_000,
+    lcp: 60_000,
+    cls: 100,
+    inp: 60_000,
+};
+
 const rate = (name: string, value: number): Rating => {
     const t = THRESHOLDS[name];
     if (!t) return 'good';
@@ -27,7 +38,9 @@ const rate = (name: string, value: number): Rating => {
 };
 
 /**
- * Observe Core Web Vitals and dispatch them as `vitals` events.
+ * Observe Core Web Vitals and dispatch them as a single `vitals` event.
+ * Metrics are buffered and flushed together when the page is hidden, so one
+ * page load produces one event instead of one per metric.
  * Uses PerformanceObserver where available.
  * Returns a cleanup function.
  */
@@ -35,26 +48,21 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     if (typeof PerformanceObserver === 'undefined') return () => {};
 
     const observers: PerformanceObserver[] = [];
-    const reported = new Set<string>();
+    const metrics = new Map<string, VitalMetric>();
 
-    const report = (name: string, value: number): void => {
-        if (reported.has(name)) return;
-        reported.add(name);
+    // Paint metrics are only valid if the page stayed visible until the paint.
+    // A tab that loads in the background paints when it is first revealed, and
+    // that paint's startTime is measured from the original navigation.
+    let firstHiddenTime = document.visibilityState === 'hidden' ? 0 : Number.POSITIVE_INFINITY;
+
+    const collect = (name: string, value: number): void => {
+        if (metrics.has(name)) return;
+        if (!Number.isFinite(value) || value < 0 || value > MAX_VALUES[name]) return;
 
         const rounded = name === 'cls' ? Math.round(value * 1000) / 1000 : Math.round(value);
         const rating = rate(name, name === 'cls' ? value : rounded);
 
-        logger.event('vitals', { name, value: rounded, rating });
-
-        const event: EyesEvent = {
-            type: 'vitals',
-            url: tracker.currentUrl(),
-            sessionId: getSessionId(),
-            timestamp: Date.now(),
-            metric: { name, value: rounded, rating },
-        };
-
-        tracker.send(event);
+        metrics.set(name, { name, value: rounded, rating });
     };
 
     const observe = (
@@ -72,7 +80,7 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     };
 
     // -----------------------------------------------------------------
-    // TTFB — Time to First Byte
+    // TTFB: Time to First Byte
     // -----------------------------------------------------------------
     observe('navigation', entries => {
         const navigation = entries[0] as
@@ -80,34 +88,31 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
             | undefined;
         if (navigation?.responseStart) {
             const activationStart = navigation.activationStart ?? 0;
-            report('ttfb', navigation.responseStart - activationStart);
+            collect('ttfb', navigation.responseStart - activationStart);
         }
     });
 
     // -----------------------------------------------------------------
-    // FCP — First Contentful Paint
+    // FCP: First Contentful Paint
     // -----------------------------------------------------------------
     observe('paint', entries => {
         const fcp = entries.find(entry => entry.name === 'first-contentful-paint');
-        if (fcp) report('fcp', fcp.startTime);
+        if (fcp && fcp.startTime < firstHiddenTime) collect('fcp', fcp.startTime);
     });
 
     // -----------------------------------------------------------------
-    // LCP — Largest Contentful Paint
+    // LCP: Largest Contentful Paint
     // -----------------------------------------------------------------
+    // The browser stops emitting LCP candidates after the first interaction,
+    // so the last observed value is final by the time the page is hidden.
     let lcpValue = 0;
     observe('largest-contentful-paint', entries => {
         const last = entries.at(-1);
-        if (last) lcpValue = last.startTime;
+        if (last && last.startTime < firstHiddenTime) lcpValue = last.startTime;
     });
 
-    // LCP finalises on first input or page hide
-    const finaliseLcp = (): void => {
-        if (lcpValue > 0) report('lcp', lcpValue);
-    };
-
     // -----------------------------------------------------------------
-    // CLS — Cumulative Layout Shift
+    // CLS: Cumulative Layout Shift
     // -----------------------------------------------------------------
     let clsValue = 0;
     let clsSessionValue = 0;
@@ -144,7 +149,7 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     });
 
     // -----------------------------------------------------------------
-    // INP — Interaction to Next Paint
+    // INP: Interaction to Next Paint
     // -----------------------------------------------------------------
     let inpValue = 0;
     const interactions = new Map<number, number>();
@@ -177,38 +182,57 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     );
 
     // -----------------------------------------------------------------
-    // Finalise on page hide — LCP, CLS, INP are reported at this point
+    // Flush on page hide: LCP, CLS and INP finalise here and every
+    // collected metric is dispatched together as a single `vitals` event.
     // -----------------------------------------------------------------
+    let sent = false;
 
-    const onPageHide = (): void => {
-        finaliseLcp();
-        if (clsValue > 0) report('cls', clsValue);
-        if (inpValue > 0) report('inp', inpValue);
+    const flush = (): void => {
+        if (sent) return;
+
+        if (lcpValue > 0) collect('lcp', lcpValue);
+        if (clsValue > 0) collect('cls', clsValue);
+        if (inpValue > 0) collect('inp', inpValue);
+
+        if (metrics.size === 0) return;
+        sent = true;
+
+        const collected = [...metrics.values()];
+        logger.event('vitals', { metrics: collected });
+
+        const event: EyesEvent = {
+            type: 'vitals',
+            url: tracker.currentUrl(),
+            sessionId: getSessionId(),
+            timestamp: Date.now(),
+            metrics: collected,
+        };
+
+        tracker.send(event);
     };
 
     const onVisibilityChange = (): void => {
-        if (document.visibilityState === 'hidden') onPageHide();
+        if (document.visibilityState !== 'hidden') return;
+
+        firstHiddenTime = Math.min(firstHiddenTime, performance.now());
+        flush();
+    };
+
+    // After a back/forward cache restore every timestamp is still relative to
+    // the original navigation, so nothing measured afterwards is trustworthy.
+    const onPageShow = (event: PageTransitionEvent): void => {
+        if (event.persisted) sent = true;
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
-
-    window.addEventListener('pagehide', onPageHide);
-
-    // Finalise LCP on first interaction
-    const onFirstInteraction = () => {
-        finaliseLcp();
-        window.removeEventListener('keydown', onFirstInteraction, true);
-        window.removeEventListener('click', onFirstInteraction, true);
-    };
-    window.addEventListener('keydown', onFirstInteraction, { capture: true, once: true });
-    window.addEventListener('click', onFirstInteraction, { capture: true, once: true });
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('pageshow', onPageShow);
 
     return () => {
         for (const obs of observers) obs.disconnect();
         document.removeEventListener('visibilitychange', onVisibilityChange);
-        window.removeEventListener('pagehide', onPageHide);
-        window.removeEventListener('keydown', onFirstInteraction, true);
-        window.removeEventListener('click', onFirstInteraction, true);
+        window.removeEventListener('pagehide', flush);
+        window.removeEventListener('pageshow', onPageShow);
     };
 };
 

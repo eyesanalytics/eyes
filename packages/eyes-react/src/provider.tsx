@@ -1,7 +1,7 @@
 'use client';
 
 import type { EyesConfig } from 'eyes-types';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
 import { EyesContext } from '~/context';
 import type { EyesContextValue, EyesProviderProps } from '~/types';
 
@@ -18,7 +18,7 @@ export const EyesProvider = ({
     consentRequired,
     beforeSend,
     children,
-}: EyesProviderProps) => {
+}: EyesProviderProps): ReactElement => {
     const initCalled = useRef(false);
     const configRef = useRef<EyesConfig>({ siteId });
 

@@ -4,7 +4,7 @@ import { useContext } from 'react';
 import { EyesContext } from '~/context';
 
 /**
- * Default event map — any string name with optional props.
+ * Default event map: any string name with optional props.
  */
 type DefaultEventMap = Record<string, Record<string, string | number | boolean> | undefined>;
 
@@ -28,6 +28,13 @@ export interface TypedEyesContextValue<TEvents extends DefaultEventMap> {
     flush(): Promise<void>;
     /** Stop tracking, flush remaining events, tear down. */
     shutdown(): Promise<void>;
+}
+
+export interface TypedEyes<TEvents extends DefaultEventMap> {
+    /** Type-safe hook for accessing the Eyes tracker. */
+    useEyes: () => TypedEyesContextValue<TEvents>;
+    /** Type-safe standalone track function. */
+    track: TypedTrack<TEvents>;
 }
 
 /**
@@ -57,7 +64,9 @@ export interface TypedEyesContextValue<TEvents extends DefaultEventMap> {
  * track('Unknown Event'); // ✗ type error
  * ```
  */
-export const createEyes = <TEvents extends DefaultEventMap = DefaultEventMap>() => {
+export const createEyes = <
+    TEvents extends DefaultEventMap = DefaultEventMap,
+>(): TypedEyes<TEvents> => {
     /**
      * Type-safe hook for accessing the Eyes tracker.
      */
@@ -68,7 +77,7 @@ export const createEyes = <TEvents extends DefaultEventMap = DefaultEventMap>() 
 
     /**
      * Type-safe standalone track function.
-     * Calls the global `window.Eyes.track()` directly — works without the hook.
+     * Calls the global `window.Eyes.track()` directly; works without the hook.
      */
     const track: TypedTrack<TEvents> = (
         name: string,

@@ -69,7 +69,7 @@ const createTransport = (config: ResolvedConfig, logger: Logger): Transport => {
             name: 'name' in event ? event.name : event.type,
             url: event.url,
             ...('props' in event && event.props ? { props: event.props } : {}),
-            ...('metric' in event && event.metric ? { metric: event.metric } : {}),
+            ...('metrics' in event && event.metrics ? { metrics: event.metrics } : {}),
         });
         if (queue.length >= config.maxBatchSize) {
             flush();

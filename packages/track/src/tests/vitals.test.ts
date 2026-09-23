@@ -1,4 +1,4 @@
-import type { EyesEvent } from 'eyes-types';
+import type { EyesEvent, VitalMetric, VitalsEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '~/config';
 import type { EyesTracker } from '~/core';
@@ -58,10 +58,36 @@ const fireEntries = (type: string, entries: Record<string, unknown>[]) => {
     if (cb) cb(entries);
 };
 
+const setVisibilityState = (value: 'visible' | 'hidden') => {
+    Object.defineProperty(document, 'visibilityState', {
+        value,
+        configurable: true,
+        writable: true,
+    });
+};
+
+// Simulate the page being hidden, which is when vitals are flushed
+const hidePage = () => {
+    setVisibilityState('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+};
+
+// Extract the single vitals event the tracker should have sent
+const sentVitals = (tracker: ReturnType<typeof makeTracker>): VitalsEvent => {
+    expect(tracker.send).toHaveBeenCalledOnce();
+    const event = tracker.send.mock.calls[0][0];
+    expect(event.type).toBe('vitals');
+    return event as VitalsEvent;
+};
+
+const metric = (event: VitalsEvent, name: string): VitalMetric | undefined =>
+    event.metrics.find(m => m.name === name);
+
 describe('vitals', () => {
     beforeEach(() => {
         setupPerformanceObserverMock();
         sessionStorage.clear();
+        setVisibilityState('visible');
     });
 
     afterEach(() => {
@@ -77,18 +103,46 @@ describe('vitals', () => {
         expect(tracker.send).not.toHaveBeenCalled();
     });
 
+    it('does not send until the page is hidden', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 1200 }]);
+
+        expect(tracker.send).not.toHaveBeenCalled();
+
+        cleanup();
+    });
+
+    it('sends all collected metrics together as a single event', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 1200 }]);
+        fireEntries('largest-contentful-paint', [{ startTime: 3200 }]);
+        fireEntries('layout-shift', [{ hadRecentInput: false, value: 0.05, startTime: 1000 }]);
+        fireEntries('event', [{ interactionId: 1, duration: 300, startTime: 100 }]);
+
+        hidePage();
+
+        const event = sentVitals(tracker);
+        expect(event.metrics.map(m => m.name).sort()).toEqual(['cls', 'fcp', 'inp', 'lcp', 'ttfb']);
+
+        cleanup();
+    });
+
     it('reports TTFB from navigation entries', () => {
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
         fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        hidePage();
 
-        expect(tracker.send).toHaveBeenCalledOnce();
-        const event: EyesEvent = tracker.send.mock.calls[0][0];
-        expect(event.type).toBe('vitals');
-        expect(event.metric?.name).toBe('ttfb');
-        expect(event.metric?.value).toBe(250);
-        expect(event.metric?.rating).toBe('good'); // 250 <= 800
+        const ttfb = metric(sentVitals(tracker), 'ttfb');
+        expect(ttfb?.value).toBe(250);
+        expect(ttfb?.rating).toBe('good'); // 250 <= 800
 
         cleanup();
     });
@@ -98,9 +152,9 @@ describe('vitals', () => {
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
         fireEntries('navigation', [{ responseStart: 1000, activationStart: 200 }]);
+        hidePage();
 
-        const event: EyesEvent = tracker.send.mock.calls[0][0];
-        expect(event.metric?.value).toBe(800); // 1000 - 200
+        expect(metric(sentVitals(tracker), 'ttfb')?.value).toBe(800); // 1000 - 200
 
         cleanup();
     });
@@ -113,17 +167,16 @@ describe('vitals', () => {
             { name: 'first-paint', startTime: 500 },
             { name: 'first-contentful-paint', startTime: 1200 },
         ]);
+        hidePage();
 
-        expect(tracker.send).toHaveBeenCalled();
-        const event: EyesEvent = tracker.send.mock.calls[0][0];
-        expect(event.metric?.name).toBe('fcp');
-        expect(event.metric?.value).toBe(1200);
-        expect(event.metric?.rating).toBe('good'); // 1200 <= 1800
+        const fcp = metric(sentVitals(tracker), 'fcp');
+        expect(fcp?.value).toBe(1200);
+        expect(fcp?.rating).toBe('good'); // 1200 <= 1800
 
         cleanup();
     });
 
-    it('reports LCP on page hide', () => {
+    it('reports LCP on page hide using the last observed entry', () => {
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
@@ -133,36 +186,13 @@ describe('vitals', () => {
         ]);
 
         // LCP isn't reported until page hide
-        const lcpCalls = tracker.send.mock.calls.filter(c => c[0].metric?.name === 'lcp');
-        expect(lcpCalls).toHaveLength(0);
+        expect(tracker.send).not.toHaveBeenCalled();
 
-        // Simulate page hide
-        Object.defineProperty(document, 'visibilityState', {
-            value: 'hidden',
-            configurable: true,
-            writable: true,
-        });
-        document.dispatchEvent(new Event('visibilitychange'));
+        hidePage();
 
-        const lcpAfterHide = tracker.send.mock.calls.filter(c => c[0].metric?.name === 'lcp');
-        expect(lcpAfterHide).toHaveLength(1);
-        expect(lcpAfterHide[0][0].metric.value).toBe(3200);
-        expect(lcpAfterHide[0][0].metric.rating).toBe('needs-improvement'); // 2500 < 3200 <= 4000
-
-        cleanup();
-    });
-
-    it('reports LCP on first interaction (keydown)', () => {
-        const tracker = makeTracker();
-        const cleanup = initVitals(asTracker(tracker), noopLogger);
-
-        fireEntries('largest-contentful-paint', [{ startTime: 1500 }]);
-
-        window.dispatchEvent(new KeyboardEvent('keydown'));
-
-        const lcpCalls = tracker.send.mock.calls.filter(c => c[0].metric?.name === 'lcp');
-        expect(lcpCalls).toHaveLength(1);
-        expect(lcpCalls[0][0].metric.value).toBe(1500);
+        const lcp = metric(sentVitals(tracker), 'lcp');
+        expect(lcp?.value).toBe(3200);
+        expect(lcp?.rating).toBe('needs-improvement'); // 2500 < 3200 <= 4000
 
         cleanup();
     });
@@ -178,19 +208,12 @@ describe('vitals', () => {
             { hadRecentInput: true, value: 0.5, startTime: 1600 }, // has recent input, ignored
         ]);
 
-        // Trigger page hide
-        Object.defineProperty(document, 'visibilityState', {
-            value: 'hidden',
-            configurable: true,
-            writable: true,
-        });
-        document.dispatchEvent(new Event('visibilitychange'));
+        hidePage();
 
-        const clsCalls = tracker.send.mock.calls.filter(c => c[0].metric?.name === 'cls');
-        expect(clsCalls).toHaveLength(1);
+        const cls = metric(sentVitals(tracker), 'cls');
         // 0.05 + 0.03 = 0.08
-        expect(clsCalls[0][0].metric.value).toBe(0.08);
-        expect(clsCalls[0][0].metric.rating).toBe('good'); // 0.08 <= 0.1
+        expect(cls?.value).toBe(0.08);
+        expect(cls?.rating).toBe('good'); // 0.08 <= 0.1
 
         cleanup();
     });
@@ -206,31 +229,100 @@ describe('vitals', () => {
             { interactionId: 3, duration: 300, startTime: 300 },
         ]);
 
-        Object.defineProperty(document, 'visibilityState', {
-            value: 'hidden',
-            configurable: true,
-            writable: true,
-        });
-        document.dispatchEvent(new Event('visibilitychange'));
+        hidePage();
 
-        const inpCalls = tracker.send.mock.calls.filter(c => c[0].metric?.name === 'inp');
-        expect(inpCalls).toHaveLength(1);
         // p98 of [50, 120, 300]: sorted desc = [300, 120, 50], idx = min(2, floor(3/50)) = 0 → 300
-        expect(inpCalls[0][0].metric.value).toBe(300);
+        expect(metric(sentVitals(tracker), 'inp')?.value).toBe(300);
 
         cleanup();
     });
 
-    it('does not report the same metric twice', () => {
+    it('does not collect the same metric twice', () => {
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
         fireEntries('navigation', [{ responseStart: 200, activationStart: 0 }]);
         fireEntries('navigation', [{ responseStart: 300, activationStart: 0 }]);
+        hidePage();
 
-        const ttfbCalls = tracker.send.mock.calls.filter(c => c[0].metric?.name === 'ttfb');
-        expect(ttfbCalls).toHaveLength(1);
-        expect(ttfbCalls[0][0].metric.value).toBe(200); // first report wins
+        const event = sentVitals(tracker);
+        const ttfbMetrics = event.metrics.filter(m => m.name === 'ttfb');
+        expect(ttfbMetrics).toHaveLength(1);
+        expect(ttfbMetrics[0].value).toBe(200); // first value wins
+
+        cleanup();
+    });
+
+    it('does not send twice across visibilitychange and pagehide', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+
+        hidePage();
+        window.dispatchEvent(new Event('pagehide'));
+
+        expect(tracker.send).toHaveBeenCalledOnce();
+
+        cleanup();
+    });
+
+    it('does not send when no metrics were collected', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        hidePage();
+
+        expect(tracker.send).not.toHaveBeenCalled();
+
+        cleanup();
+    });
+
+    it('discards paint metrics when the page loaded hidden', () => {
+        setVisibilityState('hidden');
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        // A background tab paints when it is first revealed, so the paint
+        // startTime spans the whole time the tab sat hidden
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 67_059_280 }]);
+        fireEntries('largest-contentful-paint', [{ startTime: 67_059_280 }]);
+
+        hidePage();
+
+        const event = sentVitals(tracker);
+        expect(event.metrics.map(m => m.name)).toEqual(['ttfb']);
+
+        cleanup();
+    });
+
+    it('discards implausible metric values', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 90_000_000, activationStart: 0 }]);
+        fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 1200 }]);
+        fireEntries('event', [{ interactionId: 1, duration: 533_805_810, startTime: 100 }]);
+
+        hidePage();
+
+        const event = sentVitals(tracker);
+        expect(event.metrics.map(m => m.name)).toEqual(['fcp']);
+
+        cleanup();
+    });
+
+    it('does not send after a back/forward cache restore', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+
+        window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+        hidePage();
+
+        expect(tracker.send).not.toHaveBeenCalled();
 
         cleanup();
     });
@@ -267,9 +359,9 @@ describe('vitals', () => {
                 fireEntries('paint', [{ name: 'first-contentful-paint', startTime: value }]);
             }
 
-            const calls = tracker.send.mock.calls.filter(c => c[0].metric?.name === name);
-            expect(calls).toHaveLength(1);
-            expect(calls[0][0].metric.rating).toBe(expectedRating);
+            hidePage();
+
+            expect(metric(sentVitals(tracker), name)?.rating).toBe(expectedRating);
 
             cleanup();
         });

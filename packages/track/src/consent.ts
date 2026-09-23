@@ -6,9 +6,9 @@ type ConsentState = 'pending' | 'granted' | 'revoked';
 interface ConsentManager {
     /** Current consent state. */
     state(): ConsentState;
-    /** Grant consent — generates or reuses eyes_id cookie. */
+    /** Grant consent: generates or reuses eyes_id cookie. */
     grant(): void;
-    /** Revoke consent — removes eyes_id cookie. */
+    /** Revoke consent: removes eyes_id cookie. */
     revoke(): void;
     /** Get the current eyes_id (null if consent not granted). */
     eyesId(): string | null;
