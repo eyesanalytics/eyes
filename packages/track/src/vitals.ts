@@ -1,6 +1,6 @@
 import type { EyesEvent, VitalMetric } from 'eyes-types';
 import type { EyesTracker } from '~/core';
-import { getSessionId } from '~/session';
+import { getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
 import type { Logger } from '~/utils/logger';
 
 type Rating = 'good' | 'needs-improvement' | 'poor';
@@ -49,6 +49,15 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
 
     const observers: PerformanceObserver[] = [];
     const metrics = new Map<string, VitalMetric>();
+
+    // TTFB, FCP and LCP belong to this document load, so the event is filed under the URL the
+    // document loaded with, not whichever SPA route is active when the page is hidden.
+    const documentUrl = tracker.currentUrl();
+
+    // A page without shifts has a CLS of 0, which is a real (good) sample. Only engines that
+    // report layout shifts at all (Chromium) can say so.
+    const supportsLayoutShift =
+        PerformanceObserver.supportedEntryTypes?.includes('layout-shift') ?? false;
 
     // Paint metrics are only valid if the page stayed visible until the paint.
     // A tab that loads in the background paints when it is first revealed, and
@@ -154,31 +163,41 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     let inpValue = 0;
     const interactions = new Map<number, number>();
 
+    const recordInteractions = (
+        entries: (PerformanceEntry & { interactionId?: number; duration: number })[],
+    ): void => {
+        for (const entry of entries) {
+            // A first-input entry without an interaction id still is the page's first interaction.
+            const id = entry.interactionId || (entry.entryType === 'first-input' ? -1 : 0);
+            if (!id) continue;
+
+            // A 0 ms interaction (a touch tap in WebKit) still is a sample, so compare against a
+            // missing entry, not against 0.
+            const existing = interactions.get(id);
+            if (existing === undefined || entry.duration > existing) {
+                interactions.set(id, entry.duration);
+            }
+        }
+
+        // INP = p98 of interaction durations
+        if (interactions.size > 0) {
+            const sorted = [...interactions.values()].sort((a, b) => b - a);
+            const idx = Math.min(sorted.length - 1, Math.floor(sorted.length / 50));
+            inpValue = sorted[idx];
+        }
+    };
+
     observe(
         'event',
-        entries => {
-            for (const entry of entries as (PerformanceEntry & {
-                interactionId: number;
-                duration: number;
-            })[]) {
-                if (!entry.interactionId) continue;
-
-                const existing = interactions.get(entry.interactionId) ?? 0;
-                const duration = entry.duration;
-
-                if (duration > existing) {
-                    interactions.set(entry.interactionId, duration);
-                }
-            }
-
-            // INP = p98 of interaction durations
-            if (interactions.size > 0) {
-                const sorted = [...interactions.values()].sort((a, b) => b - a);
-                const idx = Math.min(sorted.length - 1, Math.floor(sorted.length / 50));
-                inpValue = sorted[idx];
-            }
-        },
+        entries => recordInteractions(entries as Parameters<typeof recordInteractions>[0]),
         { durationThreshold: 16 } as PerformanceObserverInit,
+    );
+
+    // Interactions faster than the 16 ms threshold never reach the event observer. The first
+    // input is always reported, so a page whose interactions were all fast still gets an INP
+    // sample instead of none, which would skew p75 upward.
+    observe('first-input', entries =>
+        recordInteractions(entries as Parameters<typeof recordInteractions>[0]),
     );
 
     // -----------------------------------------------------------------
@@ -191,8 +210,8 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
         if (sent) return;
 
         if (lcpValue > 0) collect('lcp', lcpValue);
-        if (clsValue > 0) collect('cls', clsValue);
-        if (inpValue > 0) collect('inp', inpValue);
+        if (supportsLayoutShift) collect('cls', clsValue);
+        if (interactions.size > 0) collect('inp', inpValue);
 
         if (metrics.size === 0) return;
         sent = true;
@@ -202,9 +221,9 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
 
         const event: EyesEvent = {
             type: 'vitals',
-            url: tracker.currentUrl(),
+            url: documentUrl,
             sessionId: getSessionId(),
-            timestamp: Date.now(),
+            timestamp: sessionTimestamp(),
             metrics: collected,
         };
 
@@ -224,12 +243,20 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
         if (event.persisted) sent = true;
     };
 
+    // The document's vitals belong to the visit it loaded in. When activity ends that visit, send
+    // them on its session and stop, so a later hide does not file them on the next session.
+    const offSessionExpire = onSessionExpire(() => {
+        flush();
+        sent = true;
+    });
+
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', flush);
     window.addEventListener('pageshow', onPageShow);
 
     return () => {
         for (const obs of observers) obs.disconnect();
+        offSessionExpire();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('pagehide', flush);
         window.removeEventListener('pageshow', onPageShow);

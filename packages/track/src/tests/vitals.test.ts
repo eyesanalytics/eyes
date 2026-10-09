@@ -2,6 +2,7 @@ import type { EyesEvent, VitalMetric, VitalsEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '~/config';
 import type { EyesTracker } from '~/core';
+import { touchSession } from '~/session';
 import { TEST_SITE_ID } from '~/tests/helpers';
 import { initVitals } from '~/vitals';
 
@@ -21,6 +22,15 @@ const asTracker = (mock: ReturnType<typeof makeTracker>) => mock as unknown as E
 // Store observer callbacks keyed by entry type so tests can trigger them
 type ObserverCallback = (entries: Record<string, unknown>[]) => void;
 let observerCallbacks: Map<string, ObserverCallback>;
+// Chromium's list; Firefox and WebKit leave out layout-shift
+let supportedEntryTypes = [
+    'navigation',
+    'paint',
+    'largest-contentful-paint',
+    'layout-shift',
+    'event',
+    'first-input',
+];
 let mockObservers: Array<{ disconnect: ReturnType<typeof vi.fn> }>;
 
 const setupPerformanceObserverMock = () => {
@@ -30,6 +40,7 @@ const setupPerformanceObserverMock = () => {
     vi.stubGlobal(
         'PerformanceObserver',
         class MockPerformanceObserver {
+            static supportedEntryTypes = supportedEntryTypes;
             private callback: PerformanceObserverCallback;
             disconnect = vi.fn();
 
@@ -268,6 +279,9 @@ describe('vitals', () => {
     });
 
     it('does not send when no metrics were collected', () => {
+        // Without layout-shift support there is not even a CLS 0 to report
+        supportedEntryTypes = supportedEntryTypes.filter(type => type !== 'layout-shift');
+        setupPerformanceObserverMock();
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
@@ -275,6 +289,7 @@ describe('vitals', () => {
 
         expect(tracker.send).not.toHaveBeenCalled();
 
+        supportedEntryTypes = [...supportedEntryTypes, 'layout-shift'];
         cleanup();
     });
 
@@ -292,7 +307,7 @@ describe('vitals', () => {
         hidePage();
 
         const event = sentVitals(tracker);
-        expect(event.metrics.map(m => m.name)).toEqual(['ttfb']);
+        expect(event.metrics.map(m => m.name)).toEqual(['ttfb', 'cls']);
 
         cleanup();
     });
@@ -308,7 +323,7 @@ describe('vitals', () => {
         hidePage();
 
         const event = sentVitals(tracker);
-        expect(event.metrics.map(m => m.name)).toEqual(['fcp']);
+        expect(event.metrics.map(m => m.name)).toEqual(['fcp', 'cls']);
 
         cleanup();
     });
@@ -323,6 +338,113 @@ describe('vitals', () => {
         hidePage();
 
         expect(tracker.send).not.toHaveBeenCalled();
+
+        cleanup();
+    });
+
+    it('sends CLS 0 when the engine reports layout shifts and none happened', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        hidePage();
+
+        const cls = metric(sentVitals(tracker), 'cls');
+        expect(cls?.value).toBe(0);
+        expect(cls?.rating).toBe('good');
+
+        cleanup();
+    });
+
+    it('leaves CLS out where the engine cannot report layout shifts', () => {
+        supportedEntryTypes = supportedEntryTypes.filter(type => type !== 'layout-shift');
+        setupPerformanceObserverMock();
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        hidePage();
+
+        expect(metric(sentVitals(tracker), 'cls')).toBeUndefined();
+
+        supportedEntryTypes = [...supportedEntryTypes, 'layout-shift'];
+        cleanup();
+    });
+
+    it('reports INP from the first input when every interaction was under the event threshold', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('first-input', [
+            { entryType: 'first-input', interactionId: 7, duration: 8, startTime: 100 },
+        ]);
+        hidePage();
+
+        expect(metric(sentVitals(tracker), 'inp')?.value).toBe(8);
+
+        cleanup();
+    });
+
+    it('reports INP 0 for a first input that took no measurable time', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('first-input', [
+            { entryType: 'first-input', interactionId: 3, duration: 0, startTime: 100 },
+        ]);
+        hidePage();
+
+        const inp = metric(sentVitals(tracker), 'inp');
+        expect(inp?.value).toBe(0);
+        expect(inp?.rating).toBe('good');
+
+        cleanup();
+    });
+
+    it('files vitals under the URL the document loaded with, not a later SPA route', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        tracker.currentUrl.mockReturnValue('https://example.com/app/settings');
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        hidePage();
+
+        expect(sentVitals(tracker).url).toBe('https://example.com/page');
+
+        cleanup();
+    });
+
+    it('stamps the event with the last activity once the session has expired', () => {
+        const lastActivity = Date.now() - 45 * 60 * 1000;
+        sessionStorage.setItem('eyes_sid', 'idle-session');
+        sessionStorage.setItem('eyes_sid_at', String(lastActivity));
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        hidePage();
+
+        const event = sentVitals(tracker);
+        expect(event.timestamp).toBe(lastActivity);
+        expect(event.sessionId).toBe('idle-session');
+
+        cleanup();
+    });
+
+    it('sends vitals on the ended session when activity after idling starts a new one', () => {
+        const lastActivity = Date.now() - 45 * 60 * 1000;
+        sessionStorage.setItem('eyes_sid', 'idle-session');
+        sessionStorage.setItem('eyes_sid_at', String(lastActivity));
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        touchSession();
+        hidePage();
+
+        const event = sentVitals(tracker);
+        expect(event.sessionId).toBe('idle-session');
+        expect(event.timestamp).toBe(lastActivity);
 
         cleanup();
     });

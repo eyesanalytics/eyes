@@ -89,7 +89,7 @@ describe('transport', () => {
         transport.stop();
     });
 
-    it('falls back to sendBeacon when fetch fails', async () => {
+    it('does not resend a batch when fetch rejects', async () => {
         fetchSpy.mockRejectedValueOnce(new Error('fetch failed'));
         const beaconSpy = vi.fn().mockReturnValue(true);
         navigator.sendBeacon = beaconSpy;
@@ -98,8 +98,43 @@ describe('transport', () => {
         transport.enqueue(makeEvent());
         await transport.flush();
 
+        // A keepalive request can arrive even when its promise rejects, so a second copy would
+        // double count.
+        expect(beaconSpy).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('flushes on pagehide with a beacon that carries the site id', () => {
+        const beaconSpy = vi.fn().mockReturnValue(true);
+        navigator.sendBeacon = beaconSpy;
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.start();
+        transport.enqueue(makeEvent({ name: 'leave' }));
+        window.dispatchEvent(new Event('pagehide'));
+
         expect(beaconSpy).toHaveBeenCalledOnce();
-        expect(beaconSpy.mock.calls[0][0]).toBe('https://example.com/v1/events');
+        expect(beaconSpy.mock.calls[0][0]).toBe(
+            `https://example.com/v1/events?site_id=${TEST_SITE_ID}`,
+        );
+        expect(JSON.parse(beaconSpy.mock.calls[0][1])[0].name).toBe('leave');
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        transport.stop();
+    });
+
+    it('falls back to a keepalive fetch when the browser refuses the beacon', () => {
+        navigator.sendBeacon = vi.fn().mockReturnValue(false);
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.start();
+        transport.enqueue(makeEvent());
+        window.dispatchEvent(new Event('pagehide'));
+
+        expect(fetchSpy).toHaveBeenCalledOnce();
+        expect(fetchSpy.mock.calls[0][1].keepalive).toBe(true);
+
+        transport.stop();
     });
 
     it('silently drops events when bot is detected', async () => {

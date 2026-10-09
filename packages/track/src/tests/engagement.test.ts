@@ -2,6 +2,7 @@ import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EyesTracker } from '~/core';
 import { initEngagement } from '~/engagement';
+import { getSessionId, SESSION_TIMEOUT_MS, touchSession } from '~/session';
 import { TEST_SITE_ID, testEyesConfig } from '~/tests/helpers';
 
 const noopLogger = { info: vi.fn(), event: vi.fn(), warn: vi.fn() };
@@ -55,6 +56,58 @@ describe('engagement', () => {
         const event = tracker.send.mock.calls[0][0] as EyesEvent;
         expect(event.type).toBe('engagement');
         expect(event.activeTime).toBeGreaterThanOrEqual(2000);
+
+        cleanup();
+    });
+
+    it('sends engagement on pagehide, once, when the page is left', () => {
+        const tracker = makeTracker();
+        const cleanup = initEngagement(asTracker(tracker), noopLogger);
+
+        vi.advanceTimersByTime(3000);
+
+        // A navigation fires pagehide first, then visibilitychange to hidden
+        window.dispatchEvent(new Event('pagehide'));
+        Object.defineProperty(document, 'visibilityState', {
+            value: 'hidden',
+            configurable: true,
+            writable: true,
+        });
+        document.dispatchEvent(new Event('visibilitychange'));
+
+        expect(tracker.send).toHaveBeenCalledOnce();
+        expect((tracker.send.mock.calls[0][0] as EyesEvent).activeTime).toBeGreaterThanOrEqual(
+            3000,
+        );
+
+        cleanup();
+    });
+
+    it('sends again after a later hide only when engagement grew', () => {
+        const tracker = makeTracker();
+        const cleanup = initEngagement(asTracker(tracker), noopLogger);
+        const setVisibility = (value: 'visible' | 'hidden') => {
+            Object.defineProperty(document, 'visibilityState', {
+                value,
+                configurable: true,
+                writable: true,
+            });
+            document.dispatchEvent(new Event('visibilitychange'));
+        };
+
+        vi.advanceTimersByTime(2000);
+        setVisibility('hidden');
+        setVisibility('visible');
+        setVisibility('hidden');
+        expect(tracker.send).toHaveBeenCalledOnce();
+
+        setVisibility('visible');
+        vi.advanceTimersByTime(2000);
+        window.dispatchEvent(new Event('pagehide'));
+        expect(tracker.send).toHaveBeenCalledTimes(2);
+        expect((tracker.send.mock.calls[1][0] as EyesEvent).activeTime).toBeGreaterThanOrEqual(
+            4000,
+        );
 
         cleanup();
     });
@@ -178,6 +231,66 @@ describe('engagement', () => {
         // After cleanup, page should no longer be the wrapped version
         // The original is stored via .bind(), so we verify it changed back
         expect(tracker.page).not.toBe(wrappedPage);
+    });
+
+    it('files engagement on the ended session when activity after idling starts a new one', () => {
+        sessionStorage.clear();
+        const tracker = makeTracker();
+        tracker.page.mockImplementation(() => touchSession());
+        const cleanup = initEngagement(asTracker(tracker), noopLogger);
+        const start = Date.now();
+        const idle = touchSession(start);
+
+        vi.advanceTimersByTime(SESSION_TIMEOUT_MS + 60_000);
+        const next = touchSession();
+
+        expect(tracker.send).toHaveBeenCalledOnce();
+        const event = tracker.send.mock.calls[0][0] as EyesEvent;
+        expect(event.sessionId).toBe(idle);
+        expect(event.timestamp).toBe(start);
+        expect(next).not.toBe(idle);
+
+        // The page belongs to the ended visit, so leaving it reports nothing on the new session.
+        vi.advanceTimersByTime(5000);
+        Object.defineProperty(document, 'visibilityState', {
+            value: 'hidden',
+            configurable: true,
+            writable: true,
+        });
+        document.dispatchEvent(new Event('visibilitychange'));
+        expect(tracker.send).toHaveBeenCalledOnce();
+
+        // The next pageview is reported again, on the new session.
+        Object.defineProperty(document, 'visibilityState', {
+            value: 'visible',
+            configurable: true,
+            writable: true,
+        });
+        tracker.page();
+        vi.advanceTimersByTime(2000);
+        cleanup();
+
+        expect(tracker.send).toHaveBeenCalledTimes(2);
+        expect((tracker.send.mock.calls[1][0] as EyesEvent).sessionId).toBe(getSessionId());
+        expect(getSessionId()).toBe(next);
+    });
+
+    it('keeps reporting a pageview whose own activity expired the session', () => {
+        sessionStorage.clear();
+        const tracker = makeTracker();
+        tracker.page.mockImplementation(() => touchSession());
+        const cleanup = initEngagement(asTracker(tracker), noopLogger);
+        touchSession(Date.now());
+
+        vi.advanceTimersByTime(SESSION_TIMEOUT_MS + 60_000);
+        tracker.page();
+        tracker.send.mockClear();
+
+        vi.advanceTimersByTime(2000);
+        cleanup();
+
+        expect(tracker.send).toHaveBeenCalledOnce();
+        expect((tracker.send.mock.calls[0][0] as EyesEvent).sessionId).toBe(getSessionId());
     });
 
     it('includes scroll depth in the engagement event', () => {

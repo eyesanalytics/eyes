@@ -2,6 +2,7 @@
 
 import { useContext } from 'react';
 import { EyesContext } from '~/context';
+import { callEyes } from '~/queue';
 
 /**
  * Default event map: any string name with optional props.
@@ -77,15 +78,14 @@ export const createEyes = <
 
     /**
      * Type-safe standalone track function.
-     * Calls the global `window.Eyes.track()` directly; works without the hook.
+     * Calls the global `window.Eyes.track()`, or queues the call until the script has loaded;
+     * works without the hook.
      */
     const track: TypedTrack<TEvents> = (
         name: string,
         props?: Record<string, string | number | boolean>,
     ) => {
-        if (typeof window !== 'undefined') {
-            window.Eyes?.track(name, props);
-        }
+        callEyes(eyes => eyes.track(name, props));
     };
 
     return { useEyes, track };

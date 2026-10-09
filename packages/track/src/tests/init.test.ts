@@ -156,7 +156,7 @@ describe('init (integration)', () => {
         await shutdown();
     });
 
-    it('module-level functions are noops before init', async () => {
+    it('module-level functions send nothing before init', async () => {
         const { track, flush } = await importModule();
 
         // These should not throw
@@ -164,6 +164,51 @@ describe('init (integration)', () => {
         await flush();
 
         expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('module-level track/page before init are sent once init runs', async () => {
+        const { init, track, page, flush, shutdown } = await importModule();
+
+        track('BeforeInit', { step: 'mount' });
+        page({ section: 'thanks' });
+        init(testEyesConfig({ autoPageview: false }));
+        await flush();
+
+        expect(fetchSpy).toHaveBeenCalled();
+        const body: EyesEvent[] = JSON.parse(fetchSpy.mock.calls[0][1].body);
+        expect(body.map(e => e.type)).toEqual(['event', 'pageview']);
+        expect(body[0]).toMatchObject({ name: 'BeforeInit', props: { step: 'mount' } });
+        expect(body[1].props).toEqual({ section: 'thanks' });
+
+        await shutdown();
+    });
+
+    it('module-level calls before init land after the initial pageview', async () => {
+        const { init, track, flush, shutdown } = await importModule();
+
+        track('BeforeInit');
+        init(testEyesConfig());
+        await flush();
+
+        const events: EyesEvent[] = fetchSpy.mock.calls.flatMap(call => JSON.parse(call[1].body));
+        expect(events.map(e => e.type)).toEqual(['pageview', 'event']);
+
+        await shutdown();
+    });
+
+    it('caps the calls queued before init', async () => {
+        const { init, track, flush, shutdown } = await importModule();
+
+        for (let i = 0; i < 150; i++) track(`Queued ${i}`);
+        init(testEyesConfig({ autoPageview: false }));
+        await flush();
+
+        const events: EyesEvent[] = fetchSpy.mock.calls.flatMap(call => JSON.parse(call[1].body));
+        expect(events).toHaveLength(100);
+        expect(events[0].name).toBe('Queued 0');
+        expect(events.at(-1)?.name).toBe('Queued 99');
+
+        await shutdown();
     });
 
     it('shutdown allows re-init', async () => {

@@ -7,9 +7,20 @@ import { isBrowser } from '~/utils/is-browser';
 // ---------------------------------------------------------------------------
 let instance: EyesTracker | null = null;
 
+// track/page calls made before init(), replayed once the tracker exists. Capped,
+// so a page that never calls init() does not grow it forever.
+const MAX_PENDING = 100;
+let pending: ((tracker: EyesTracker) => void)[] = [];
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+const enqueue = (call: (tracker: EyesTracker) => void): void => {
+    if (!isBrowser() || pending.length >= MAX_PENDING) return;
+
+    pending.push(call);
+};
+
 const wrap = (t: EyesTracker): EyesContract => ({
     track: (name, props) => t.track(name, props),
     page: props => t.page(props),
@@ -60,18 +71,35 @@ const init = (config: EyesConfig): EyesContract => {
         return wrap(instance);
     }
 
-    instance = new EyesTracker(config);
-    return wrap(instance);
+    const tracker = new EyesTracker(config);
+    instance = tracker;
+
+    // Replay after the constructor's initial pageview, so queued events land on that page.
+    const queued = pending;
+    pending = [];
+    for (const call of queued) call(tracker);
+
+    return wrap(tracker);
 };
 
-/** Track a named event. */
+/** Track a named event. Calls made before init() are queued and sent once it runs. */
 const track = (name: string, props?: Props): void => {
-    instance?.track(name, props);
+    if (instance) {
+        instance.track(name, props);
+        return;
+    }
+
+    enqueue(tracker => tracker.track(name, props));
 };
 
-/** Record a pageview. */
+/** Record a pageview. Calls made before init() are queued and sent once it runs. */
 const page = (props?: Props): void => {
-    instance?.page(props);
+    if (instance) {
+        instance.page(props);
+        return;
+    }
+
+    enqueue(tracker => tracker.page(props));
 };
 
 /** Grant consent: sets persistent eyes_id cookie. */

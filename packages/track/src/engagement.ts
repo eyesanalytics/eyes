@@ -1,6 +1,6 @@
 import type { EyesEvent } from 'eyes-types';
 import type { EyesTracker } from '~/core';
-import { getSessionId } from '~/session';
+import { getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
 import type { Logger } from '~/utils/logger';
 import { throttle } from '~/utils/throttle';
 
@@ -9,7 +9,9 @@ import { throttle } from '~/utils/throttle';
  * - **Scroll depth**: maximum scroll position as a percentage (0-100)
  * - **Active time**: cumulative milliseconds the page was visible + focused
  *
- * Sends an `engagement` event on page hide or SPA navigation.
+ * Sends an `engagement` event on page hide (the first of `pagehide` and `visibilitychange`) or SPA
+ * navigation. Values are cumulative for the page, so a page left after a tab switch reports its
+ * total again only when it grew.
  * Returns a cleanup function.
  */
 const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
@@ -17,7 +19,12 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
     let activeTimeStart: number | null = null;
     let totalActiveTime = 0;
     let pageUrl = tracker.currentUrl();
-    let hasSentForCurrentPage = false;
+    let sent = { activeTime: 0, scrollDepth: 0 };
+    // pagehide and visibilitychange both fire when a page is left; send once per hidden period.
+    let sentWhileHidden = false;
+    // Once the session expires the page's engagement belongs to the ended visit. Reporting more of
+    // it would open the new session with engagement but no pageview.
+    let ended = false;
 
     // -----------------------------------------------------------------
     // Scroll depth
@@ -50,12 +57,18 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
         }
     };
 
+    const onHide = (): void => {
+        if (sentWhileHidden) return;
+        sentWhileHidden = true;
+        sendEngagement();
+    };
+
     const onVisibilityChange = (): void => {
         if (document.visibilityState === 'hidden') {
-            stopTimer();
-            sendEngagement();
+            onHide();
             return;
         }
+        sentWhileHidden = false;
         startTimer();
     };
 
@@ -72,14 +85,15 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
     // -----------------------------------------------------------------
     const sendEngagement = (): void => {
         stopTimer();
+        if (ended) return;
         if (totalActiveTime < 1000 && maxScrollDepth === 0) return;
-        if (hasSentForCurrentPage && maxScrollDepth === 0) return;
+        if (totalActiveTime <= sent.activeTime && maxScrollDepth <= sent.scrollDepth) return;
 
         const event: EyesEvent = {
             type: 'engagement',
             url: pageUrl,
             sessionId: getSessionId(),
-            timestamp: Date.now(),
+            timestamp: sessionTimestamp(),
             scrollDepth: maxScrollDepth,
             activeTime: totalActiveTime,
         };
@@ -91,7 +105,7 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
         });
 
         tracker.send(event);
-        hasSentForCurrentPage = true;
+        sent = { activeTime: totalActiveTime, scrollDepth: maxScrollDepth };
     };
 
     // -----------------------------------------------------------------
@@ -106,15 +120,25 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
         maxScrollDepth = 0;
         totalActiveTime = 0;
         activeTimeStart = null;
-        hasSentForCurrentPage = false;
+        sent = { activeTime: 0, scrollDepth: 0 };
         pageUrl = tracker.currentUrl();
 
-        // Track the actual pageview
+        // Track the actual pageview. Its activity may expire the session, which ends the reset
+        // page, so mark the new page live only afterwards.
         originalPage(props);
+        ended = false;
 
         // Start active time for new page
         if (document.visibilityState === 'visible') startTimer();
     };
+
+    // -----------------------------------------------------------------
+    // Session expiry: file the ended visit's engagement on its own session
+    // -----------------------------------------------------------------
+    const offSessionExpire = onSessionExpire(() => {
+        sendEngagement();
+        ended = true;
+    });
 
     // -----------------------------------------------------------------
     // Listeners
@@ -122,6 +146,7 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
 
     window.addEventListener('scroll', onScroll, { passive: true });
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onHide);
     window.addEventListener('focus', onFocus);
     window.addEventListener('blur', onBlur);
 
@@ -130,8 +155,10 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
 
     return () => {
         sendEngagement();
+        offSessionExpire();
         window.removeEventListener('scroll', onScroll);
         document.removeEventListener('visibilitychange', onVisibilityChange);
+        window.removeEventListener('pagehide', onHide);
         window.removeEventListener('focus', onFocus);
         window.removeEventListener('blur', onBlur);
         tracker.page = originalPage;

@@ -40,4 +40,4 @@ const buildContext = (): EventContext => {
 const currentUrl = (): string => stripHash(location.href);
 
 export type { EventContext };
-export { buildContext, currentUrl };
+export { buildContext, currentUrl, stripHash };

@@ -3,6 +3,7 @@
 import type { EyesConfig } from 'eyes-types';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
 import { EyesContext } from '~/context';
+import { callEyes, drainQueue } from '~/queue';
 import type { EyesContextValue, EyesProviderProps } from '~/types';
 
 const DEFAULT_INGRESS_URL = 'https://ingress.eyes.dev';
@@ -38,6 +39,9 @@ export const EyesProvider = ({
                 initCalled.current = true;
                 window.Eyes.init(configRef.current);
             }
+
+            // Replay track/page calls made before the script had loaded
+            drainQueue();
         };
 
         // If the script is already loaded, init immediately
@@ -64,11 +68,11 @@ export const EyesProvider = ({
     }, [scriptUrl]);
 
     const track: EyesContextValue['track'] = useCallback((name, props) => {
-        window.Eyes?.track(name, props);
+        callEyes(eyes => eyes.track(name, props));
     }, []);
 
     const page: EyesContextValue['page'] = useCallback(props => {
-        window.Eyes?.page(props);
+        callEyes(eyes => eyes.page(props));
     }, []);
 
     const flush: EyesContextValue['flush'] = useCallback(async () => {

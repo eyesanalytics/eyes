@@ -1,10 +1,11 @@
 import type { EyesConfig, EyesEvent, IdentifyTraits, Props, ResolvedConfig } from 'eyes-types';
+import { initActivity } from '~/activity';
 import { initCapture } from '~/capture';
 import { resolveConfig } from '~/config';
 import { type ConsentManager, createConsentManager } from '~/consent';
 import { buildContext, currentUrl } from '~/context';
 import { initEngagement } from '~/engagement';
-import { getSessionId } from '~/session';
+import { getSessionId, touchSession } from '~/session';
 import { createTransport, type Transport } from '~/transport';
 import { createLogger, type Logger } from '~/utils/logger';
 import { initVitals } from '~/vitals';
@@ -31,8 +32,8 @@ class EyesTracker {
             endpoint: this.config.endpoint,
         });
 
-        // Start transport auto-flush
-        this.transport.start();
+        // Input keeps the session alive; 30 minutes without it starts a new one
+        this.cleanups.push(initActivity());
 
         // Auto-capture: pageviews + outbound links
         this.cleanups.push(initCapture(this, this.config));
@@ -42,6 +43,10 @@ class EyesTracker {
 
         // Core Web Vitals
         this.cleanups.push(initVitals(this, this.logger));
+
+        // Start transport auto-flush last: listeners run in registration order, so on pagehide and
+        // visibilitychange engagement and vitals enqueue their events before the transport flushes.
+        this.transport.start();
     }
 
     /** Send a named custom event. */
@@ -53,7 +58,7 @@ class EyesTracker {
             url: context.url,
             referrer: context.referrer,
             eyesId: this.consentManager.eyesId() ?? undefined,
-            sessionId: getSessionId(),
+            sessionId: touchSession(),
             timestamp: Date.now(),
             props,
         };
@@ -72,7 +77,7 @@ class EyesTracker {
             url: context.url,
             referrer: context.referrer,
             eyesId: this.consentManager.eyesId() ?? undefined,
-            sessionId: getSessionId(),
+            sessionId: touchSession(),
             timestamp: Date.now(),
             props,
         };
@@ -81,6 +86,9 @@ class EyesTracker {
         if (!result) return;
 
         this.transport.enqueue(result);
+        // Send pageviews at once: a visitor who leaves within the flush interval would otherwise
+        // depend on the unload request, which WebKit drops when the page has not finished loading.
+        this.transport.flush();
     };
 
     /** Grant consent: sets eyes_id cookie, enables cross-session tracking. */
@@ -127,7 +135,7 @@ class EyesTracker {
             type: 'identify',
             url: currentUrl(),
             eyesId,
-            sessionId: getSessionId(),
+            sessionId: touchSession(),
             timestamp: Date.now(),
             traits,
         };

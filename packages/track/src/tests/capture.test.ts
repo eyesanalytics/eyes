@@ -117,6 +117,35 @@ describe('capture', () => {
         cleanup();
     });
 
+    it('ignores fragment-only navigation when hashRouting is false', () => {
+        const tracker = makeTracker();
+        history.replaceState(null, '', '/landing');
+        const cleanup = initCapture(asTracker(tracker), makeConfig({ hashRouting: false }));
+        tracker.page.mockClear();
+
+        // Clicking an in-page anchor updates the fragment and fires popstate
+        history.replaceState(null, '', '/landing#pricing');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+
+        expect(tracker.page).not.toHaveBeenCalled();
+
+        cleanup();
+    });
+
+    it('tracks a page restored from the back/forward cache', () => {
+        const tracker = makeTracker();
+        const cleanup = initCapture(asTracker(tracker), makeConfig());
+        tracker.page.mockClear();
+
+        window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+        expect(tracker.page).not.toHaveBeenCalled();
+
+        window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+        expect(tracker.page).toHaveBeenCalledOnce();
+
+        cleanup();
+    });
+
     it('does not listen for hashchange when hashRouting is false', () => {
         const tracker = makeTracker();
         const addSpy = vi.spyOn(window, 'addEventListener');

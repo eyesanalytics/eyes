@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from 'eyes-types';
+import { stripHash } from '~/context';
 import type { EyesTracker } from '~/core';
 
 interface PrerenderingDocument extends Document {
@@ -10,13 +11,18 @@ interface PrerenderingDocument extends Document {
  * - Initial pageview (handles prerendering)
  * - SPA navigation via pushState / popstate
  * - Hash-based routing (optional)
+ * - Pages restored from the back/forward cache
  * - Outbound link clicks
  *
  * Returns a cleanup function.
  */
 const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void) => {
     const cleanups: Array<() => void> = [];
-    let lastUrl = location.href;
+    // Fragment navigation (an in-page anchor, Back between anchors) fires popstate too. Without hash
+    // routing the fragment is not a page, so it must not count as a navigation.
+    const navigationKey = (): string =>
+        config.hashRouting ? location.href : stripHash(location.href);
+    let lastUrl = navigationKey();
     const prerenderingDocument = document as PrerenderingDocument;
 
     // -----------------------------------------------------------------
@@ -57,6 +63,16 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
             window.removeEventListener('popstate', onPopState);
         });
 
+        // A back/forward cache restore shows the page again without running any script, so no
+        // other listener sees it.
+        const onPageShow = (event: PageTransitionEvent) => {
+            if (!event.persisted) return;
+            lastUrl = navigationKey();
+            tracker.page();
+        };
+        window.addEventListener('pageshow', onPageShow);
+        cleanups.push(() => window.removeEventListener('pageshow', onPageShow));
+
         // Hash-based routing
         if (config.hashRouting) {
             const onHashChange = () => onNavigation();
@@ -66,7 +82,7 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
     }
 
     const onNavigation = (): void => {
-        const current = location.href;
+        const current = navigationKey();
         if (current === lastUrl) return;
         lastUrl = current;
         tracker.page();

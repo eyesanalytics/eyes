@@ -20,17 +20,18 @@ const createTransport = (config: ResolvedConfig, logger: Logger): Transport => {
         return bot;
     };
 
-    // Flush listeners (page hide / visibility change)
+    // Flush listeners (page hide / visibility change). The page may be unloading or about to be
+    // frozen, so these flushes go out as beacons.
     const onPageHide = () => {
-        flush();
+        flushQueue(true);
     };
 
     const onVisibilityChange = () => {
-        if (document.visibilityState === 'hidden') flush();
+        if (document.visibilityState === 'hidden') flushQueue(true);
     };
 
     // Send a batch of events to the server
-    const send = async (events: EyesEvent[]): Promise<void> => {
+    const send = async (events: EyesEvent[], unloading: boolean): Promise<void> => {
         if (events.length === 0 || checkBot()) return;
 
         const url = `${config.endpoint}/v1/events`;
@@ -38,26 +39,29 @@ const createTransport = (config: ResolvedConfig, logger: Logger): Transport => {
 
         logger.info(`Flushing ${events.length} event(s)`);
 
-        // Prefer fetch + keepalive; fall back to sendBeacon
-        if (typeof fetch === 'function') {
-            try {
-                await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Eyes-Site-Id': config.siteId,
-                    },
-                    body,
-                    keepalive: true,
-                });
-                return;
-            } catch {
-                // fetch may fail with keepalive on page unload, try beacon
-            }
+        // A beacon survives the page going away. It cannot set headers, so the site id rides in
+        // the query string, which ingress accepts as well.
+        if (unloading && typeof navigator.sendBeacon === 'function') {
+            const beaconUrl = `${url}?site_id=${encodeURIComponent(config.siteId)}`;
+            if (navigator.sendBeacon(beaconUrl, body)) return;
         }
 
-        if (typeof navigator.sendBeacon === 'function') {
-            navigator.sendBeacon(url, body);
+        if (typeof fetch !== 'function') return;
+
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Eyes-Site-Id': config.siteId,
+                },
+                body,
+                keepalive: true,
+            });
+        } catch {
+            // Never resend: a keepalive request can reach the server even when its promise
+            // rejects because the page went away, and a second copy would double count.
+            logger.info(`Flush of ${events.length} event(s) failed`);
         }
     };
 
@@ -77,11 +81,13 @@ const createTransport = (config: ResolvedConfig, logger: Logger): Transport => {
     };
 
     // Flush the queue
-    const flush = (): Promise<void> => {
+    const flushQueue = (unloading: boolean): Promise<void> => {
         if (queue.length === 0) return Promise.resolve();
         const batch = queue.splice(0);
-        return send(batch);
+        return send(batch, unloading);
     };
+
+    const flush = (): Promise<void> => flushQueue(false);
 
     // Start the transport (set up timers and listeners)
     const start = (): void => {
