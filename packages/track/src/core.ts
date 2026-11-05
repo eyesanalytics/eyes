@@ -5,7 +5,8 @@ import { resolveConfig } from '~/config';
 import { type ConsentManager, createConsentManager } from '~/consent';
 import { buildContext, currentUrl } from '~/context';
 import { initEngagement } from '~/engagement';
-import { getSessionId, touchSession } from '~/session';
+import { isOptedOut, optOutFromHash, setOptedOut } from '~/opt-out';
+import { getPageLoadId, getSessionId, touchSession } from '~/session';
 import { createTransport, type Transport } from '~/transport';
 import { createLogger, type Logger } from '~/utils/logger';
 import { initVitals } from '~/vitals';
@@ -22,10 +23,18 @@ class EyesTracker {
         this.config = resolveConfig(options);
         this.logger = createLogger(this.config.debug);
         this.transport = createTransport(this.config, this.logger);
+
+        // A fragment excludes this browser or includes it again, before anything can be sent
+        const choice = optOutFromHash();
+        if (choice) setOptedOut(choice === 'out');
+
         this.consentManager = createConsentManager(
             this.config.consentRequired,
             this.config.cookieDomain,
         );
+
+        // Set before the tracker loaded, or on another page: the cookie goes the same way as in optOut()
+        if (isOptedOut()) this.revokeConsent();
 
         this.logger.info('Initialising', {
             siteId: this.config.siteId,
@@ -51,6 +60,8 @@ class EyesTracker {
 
     /** Send a named custom event. */
     track = (name: string, props?: Props): void => {
+        if (isOptedOut()) return;
+
         const context = buildContext();
         const event: EyesEvent = {
             type: 'event',
@@ -59,6 +70,7 @@ class EyesTracker {
             referrer: context.referrer,
             eyesId: this.consentManager.eyesId() ?? undefined,
             sessionId: touchSession(),
+            pageLoadId: getPageLoadId(),
             timestamp: Date.now(),
             props,
         };
@@ -71,6 +83,8 @@ class EyesTracker {
 
     /** Send a pageview event. */
     page = (props?: Props): void => {
+        if (isOptedOut()) return;
+
         const context = buildContext();
         const event: EyesEvent = {
             type: 'pageview',
@@ -78,6 +92,7 @@ class EyesTracker {
             referrer: context.referrer,
             eyesId: this.consentManager.eyesId() ?? undefined,
             sessionId: touchSession(),
+            pageLoadId: getPageLoadId(),
             timestamp: Date.now(),
             props,
         };
@@ -91,10 +106,33 @@ class EyesTracker {
         this.transport.flush();
     };
 
-    /** Grant consent: sets eyes_id cookie, enables cross-session tracking. */
+    /** Grant consent: sets eyes_id cookie, enables cross-session tracking, sends consent_granted. */
     consent = (): void => {
+        // An objection outranks consent. A consent banner replaying its choice on every page load
+        // must not undo it, so only optIn() does.
+        if (isOptedOut()) {
+            this.logger.info('consent() dropped: opted out');
+            return;
+        }
+
+        const changed = this.consentManager.state() !== 'granted';
         this.consentManager.grant();
-        this.logger.info('Consent granted', { eyesId: this.consentManager.eyesId() });
+        const eyesId = this.consentManager.eyesId();
+
+        // Only a change is sent, so the server records when consent was given
+        if (changed && eyesId) {
+            const event: EyesEvent = {
+                type: 'consent_granted',
+                url: currentUrl(),
+                eyesId,
+                sessionId: getSessionId(),
+                timestamp: Date.now(),
+            };
+            const result = this.config.beforeSend(event);
+            if (result) this.transport.enqueue(result);
+        }
+
+        this.logger.info('Consent granted', { eyesId });
     };
 
     /** Revoke consent: removes cookie, sends consent_revoked event. */
@@ -108,6 +146,7 @@ class EyesTracker {
                 url: currentUrl(),
                 eyesId,
                 sessionId: getSessionId(),
+                pageLoadId: getPageLoadId(),
                 timestamp: Date.now(),
             };
             const result = this.config.beforeSend(event);
@@ -118,8 +157,28 @@ class EyesTracker {
         this.logger.info('Consent revoked');
     };
 
+    /**
+     * Opt this browser out: nothing is sent from now on. A visitor with an eyes_id goes through
+     * revokeConsent() first, so the server still gets the one event that erases their identity.
+     */
+    optOut = (): void => {
+        this.transport.clear();
+        this.revokeConsent();
+        setOptedOut(true);
+        this.transport.flush();
+        this.logger.info('Opted out');
+    };
+
+    /** Opt this browser back in. Tracking resumes cookieless: the cookie needs consent() again. */
+    optIn = (): void => {
+        setOptedOut(false);
+        this.logger.info('Opted in');
+    };
+
     /** Identify the current visitor. Requires consent to be granted. */
     identify = (traits: IdentifyTraits): void => {
+        if (isOptedOut()) return;
+
         if (this.consentManager.state() !== 'granted') {
             this.logger.info('identify() dropped: consent not granted');
             return;
@@ -136,6 +195,7 @@ class EyesTracker {
             url: currentUrl(),
             eyesId,
             sessionId: touchSession(),
+            pageLoadId: getPageLoadId(),
             timestamp: Date.now(),
             traits,
         };
@@ -149,6 +209,8 @@ class EyesTracker {
 
     /** Enqueue a pre-built event (used by internal modules). */
     send = (event: EyesEvent): void => {
+        if (isOptedOut()) return;
+
         // Attach eyesId to internally-generated events
         const enriched: EyesEvent = {
             ...event,

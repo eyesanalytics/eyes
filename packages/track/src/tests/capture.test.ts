@@ -178,6 +178,44 @@ describe('capture', () => {
         cleanup();
     });
 
+    it('tracks a middle click on an outbound link once', () => {
+        const tracker = makeTracker();
+        const cleanup = initCapture(asTracker(tracker), makeConfig());
+
+        const link = document.createElement('a');
+        link.href = 'https://external-site.com/new-tab';
+        document.body.appendChild(link);
+        link.addEventListener('click', e => e.preventDefault());
+
+        // Some browsers also fire click for the middle button; only auxclick counts it
+        link.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 1 }));
+
+        expect(tracker.track).toHaveBeenCalledOnce();
+        expect(tracker.track).toHaveBeenCalledWith('Outbound Click', {
+            url: 'https://external-site.com/new-tab',
+        });
+
+        document.body.removeChild(link);
+        cleanup();
+    });
+
+    it('ignores a right click on an outbound link', () => {
+        const tracker = makeTracker();
+        const cleanup = initCapture(asTracker(tracker), makeConfig());
+
+        const link = document.createElement('a');
+        link.href = 'https://external-site.com';
+        document.body.appendChild(link);
+
+        link.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 2 }));
+
+        expect(tracker.track).not.toHaveBeenCalled();
+
+        document.body.removeChild(link);
+        cleanup();
+    });
+
     it('does not track same-origin link clicks as outbound', () => {
         const tracker = makeTracker();
         const cleanup = initCapture(asTracker(tracker), makeConfig());
@@ -231,6 +269,7 @@ describe('capture', () => {
         document.body.appendChild(link);
         link.addEventListener('click', e => e.preventDefault());
         link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        link.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }));
         expect(tracker.track).not.toHaveBeenCalled();
         document.body.removeChild(link);
     });

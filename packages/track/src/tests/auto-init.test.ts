@@ -121,7 +121,7 @@ describe('auto-init (browser entry)', () => {
 
         expect(fetchSpy).toHaveBeenCalled();
         const [url, options] = fetchSpy.mock.calls[0];
-        expect(url).toBe('https://analytics.test/v1/events');
+        expect(url).toBe(`https://analytics.test/v1/events?site_id=${TEST_SITE_ID}`);
 
         const body: EyesEvent[] = JSON.parse(options.body);
         expect(body.some(event => event.name === 'AutoInit')).toBe(true);
@@ -146,7 +146,9 @@ describe('auto-init (browser entry)', () => {
         await flush();
 
         expect(fetchSpy).toHaveBeenCalled();
-        expect(fetchSpy.mock.calls[0][0]).toBe('https://analytics.test/v1/events');
+        expect(fetchSpy.mock.calls[0][0]).toBe(
+            `https://analytics.test/v1/events?site_id=${TEST_SITE_ID}`,
+        );
 
         await shutdown();
     });
@@ -220,7 +222,9 @@ describe('auto-init (browser entry)', () => {
         await api.flush();
 
         expect(fetchSpy).toHaveBeenCalled();
-        expect(fetchSpy.mock.calls[0][0]).toBe('https://analytics.test/v1/events');
+        expect(fetchSpy.mock.calls[0][0]).toBe(
+            `https://analytics.test/v1/events?site_id=${TEST_SITE_ID}`,
+        );
 
         await shutdown();
     });

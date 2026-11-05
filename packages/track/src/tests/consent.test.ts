@@ -39,12 +39,14 @@ describe('consent', () => {
 
         clearCookie();
         sessionStorage.clear();
+        localStorage.clear();
     });
 
     afterEach(() => {
         vi.useRealTimers();
         vi.restoreAllMocks();
         clearCookie();
+        localStorage.clear();
     });
 
     const importModule = () => import('~/index.js');
@@ -92,6 +94,54 @@ describe('consent', () => {
             expect(customEvent).toBeDefined();
             expect(customEvent.eyesId).toBeTypeOf('string');
             expect(customEvent.eyesId.length).toBeGreaterThan(0);
+        });
+
+        it('sends a consent_granted event with the new eyesId', async () => {
+            const { init, consent, flush } = await importModule();
+            init(testEyesConfig({ consentRequired: true, autoPageview: false }));
+
+            consent();
+            await flush();
+
+            const granted = readEventsFromCalls(fetchSpy.mock.calls).filter(
+                e => e.type === 'consent_granted',
+            );
+            expect(granted).toHaveLength(1);
+            expect(granted[0].eyesId).toBe(readEyesId());
+        });
+
+        it('sends consent_granted only when the state changes', async () => {
+            const { init, consent, flush } = await importModule();
+            init(testEyesConfig({ consentRequired: true, autoPageview: false }));
+
+            consent();
+            consent();
+            await flush();
+
+            const granted = readEventsFromCalls(fetchSpy.mock.calls).filter(
+                e => e.type === 'consent_granted',
+            );
+            expect(granted).toHaveLength(1);
+        });
+
+        it('does not send consent_granted for a returning visitor who already consented', async () => {
+            const first = await importModule();
+            first.init(testEyesConfig({ consentRequired: true, autoPageview: false }));
+            first.consent();
+            await first.flush();
+            await first.shutdown();
+            fetchSpy.mockClear();
+
+            vi.resetModules();
+            const { init, consent, flush } = await importModule();
+            init(testEyesConfig({ consentRequired: true, autoPageview: false }));
+            consent();
+            await flush();
+
+            const granted = readEventsFromCalls(fetchSpy.mock.calls).filter(
+                e => e.type === 'consent_granted',
+            );
+            expect(granted).toHaveLength(0);
         });
     });
 
@@ -183,6 +233,63 @@ describe('consent', () => {
 
             const body = JSON.parse(fetchSpy.mock.calls[0][1].body) as EyesEvent[];
             expect(body[0].eyesId).toBeTypeOf('string');
+        });
+
+        it('does not send consent_granted, since consent was never asked for', async () => {
+            const { init, consent, flush } = await importModule();
+            init(testEyesConfig({ consentRequired: false, autoPageview: false }));
+
+            consent();
+            await flush();
+
+            const granted = readEventsFromCalls(fetchSpy.mock.calls).filter(
+                e => e.type === 'consent_granted',
+            );
+            expect(granted).toHaveLength(0);
+        });
+
+        it('keeps a withdrawal across page loads instead of setting the cookie again', async () => {
+            const first = await importModule();
+            first.init(testEyesConfig({ consentRequired: false, autoPageview: false }));
+            first.revokeConsent();
+            await first.shutdown();
+            expect(readEyesId()).toBeNull();
+            expect(localStorage.getItem('eyes_consent_revoked')).toBe('1');
+
+            vi.resetModules();
+            const { init, track, flush } = await importModule();
+            init(testEyesConfig({ consentRequired: false, autoPageview: false }));
+            fetchSpy.mockClear();
+
+            track('after_reload');
+            await flush();
+
+            expect(readEyesId()).toBeNull();
+            const afterEvent = readEventsFromCalls(fetchSpy.mock.calls).find(
+                e => e.type === 'event',
+            );
+            expect(afterEvent).toBeDefined();
+            expect(afterEvent?.eyesId).toBeUndefined();
+        });
+
+        it('sets the cookie again and clears the withdrawal when consent is given again', async () => {
+            const first = await importModule();
+            first.init(testEyesConfig({ consentRequired: false, autoPageview: false }));
+            first.revokeConsent();
+            await first.shutdown();
+
+            vi.resetModules();
+            const { init, consent, flush } = await importModule();
+            init(testEyesConfig({ consentRequired: false, autoPageview: false }));
+            consent();
+            await flush();
+
+            expect(readEyesId()).not.toBeNull();
+            expect(localStorage.getItem('eyes_consent_revoked')).toBeNull();
+            const granted = readEventsFromCalls(fetchSpy.mock.calls).find(
+                e => e.type === 'consent_granted',
+            );
+            expect(granted?.eyesId).toBe(readEyesId());
         });
     });
 });

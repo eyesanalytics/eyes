@@ -17,10 +17,9 @@ describe('context', () => {
             expect(ctx.url).not.toContain('#');
         });
 
-        it('returns timezone and language', () => {
+        it('returns only the url and referrer', () => {
             const ctx = buildContext();
-            expect(typeof ctx.timezone).toBe('string');
-            expect(typeof ctx.language).toBe('string');
+            expect(Object.keys(ctx).sort()).toEqual(['referrer', 'url']);
         });
 
         it('excludes same-origin referrer', () => {

@@ -1,6 +1,6 @@
 import type { EyesEvent } from 'eyes-types';
 import type { EyesTracker } from '~/core';
-import { getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
+import { getPageLoadId, getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
 import type { Logger } from '~/utils/logger';
 import { throttle } from '~/utils/throttle';
 
@@ -93,6 +93,7 @@ const initEngagement = (tracker: EyesTracker, logger: Logger): (() => void) => {
             type: 'engagement',
             url: pageUrl,
             sessionId: getSessionId(),
+            pageLoadId: getPageLoadId(),
             timestamp: sessionTimestamp(),
             scrollDepth: maxScrollDepth,
             activeTime: totalActiveTime,

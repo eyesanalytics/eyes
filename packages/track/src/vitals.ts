@@ -1,6 +1,6 @@
 import type { EyesEvent, VitalMetric } from 'eyes-types';
 import type { EyesTracker } from '~/core';
-import { getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
+import { getPageLoadId, getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
 import type { Logger } from '~/utils/logger';
 
 type Rating = 'good' | 'needs-improvement' | 'poor';
@@ -223,6 +223,7 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
             type: 'vitals',
             url: documentUrl,
             sessionId: getSessionId(),
+            pageLoadId: getPageLoadId(),
             timestamp: sessionTimestamp(),
             metrics: collected,
         };

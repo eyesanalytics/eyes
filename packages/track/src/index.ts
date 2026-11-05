@@ -1,5 +1,6 @@
 import type { EyesConfig, EyesContract, IdentifyTraits, Props } from 'eyes-types';
 import { EyesTracker } from '~/core';
+import { setOptedOut } from '~/opt-out';
 import { isBrowser } from '~/utils/is-browser';
 
 // ---------------------------------------------------------------------------
@@ -10,15 +11,22 @@ let instance: EyesTracker | null = null;
 // track/page calls made before init(), replayed once the tracker exists. Capped,
 // so a page that never calls init() does not grow it forever.
 const MAX_PENDING = 100;
-let pending: ((tracker: EyesTracker) => void)[] = [];
+
+interface PendingCall {
+    run: (tracker: EyesTracker) => void;
+    /** A page() call without props: it adds nothing to the automatic pageview. */
+    barePageview: boolean;
+}
+
+let pending: PendingCall[] = [];
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-const enqueue = (call: (tracker: EyesTracker) => void): void => {
+const enqueue = (run: (tracker: EyesTracker) => void, barePageview = false): void => {
     if (!isBrowser() || pending.length >= MAX_PENDING) return;
 
-    pending.push(call);
+    pending.push({ run, barePageview });
 };
 
 const wrap = (t: EyesTracker): EyesContract => ({
@@ -26,6 +34,8 @@ const wrap = (t: EyesTracker): EyesContract => ({
     page: props => t.page(props),
     consent: () => t.consent(),
     revokeConsent: () => t.revokeConsent(),
+    optOut: () => t.optOut(),
+    optIn: () => t.optIn(),
     identify: traits => t.identify(traits),
     flush: () => t.flush(),
     shutdown: () => t.shutdown(),
@@ -39,6 +49,8 @@ const NOOP_API: EyesContract = {
     page: noop,
     consent: noop,
     revokeConsent: noop,
+    optOut: noop,
+    optIn: noop,
     identify: noop,
     flush: asyncNoop,
     shutdown: asyncNoop,
@@ -74,10 +86,17 @@ const init = (config: EyesConfig): EyesContract => {
     const tracker = new EyesTracker(config);
     instance = tracker;
 
-    // Replay after the constructor's initial pageview, so queued events land on that page.
+    // Replay after the constructor's initial pageview, so queued events land on that page. A
+    // replayed call reads the location at replay time, so with autoPageview a queued page()
+    // without props would record the URL the automatic pageview has just recorded (or records on
+    // activation, for a prerendered page) a second time; drop it. One with props carries data
+    // the automatic pageview lacks, so it is kept.
     const queued = pending;
     pending = [];
-    for (const call of queued) call(tracker);
+    for (const call of queued) {
+        if (call.barePageview && tracker.config.autoPageview) continue;
+        call.run(tracker);
+    }
 
     return wrap(tracker);
 };
@@ -99,7 +118,7 @@ const page = (props?: Props): void => {
         return;
     }
 
-    enqueue(tracker => tracker.page(props));
+    enqueue(tracker => tracker.page(props), !props);
 };
 
 /** Grant consent: sets persistent eyes_id cookie. */
@@ -110,6 +129,27 @@ const consent = (): void => {
 /** Revoke consent: removes eyes_id cookie, reverts to anonymous. */
 const revokeConsent = (): void => {
     instance?.revokeConsent();
+};
+
+/**
+ * Opt this browser out: nothing is sent until optIn(). Works before init(), so a choice made early
+ * is in place before the first pageview.
+ */
+const optOut = (): void => {
+    if (instance) {
+        instance.optOut();
+    } else if (isBrowser()) {
+        setOptedOut(true);
+    }
+};
+
+/** Opt this browser back in. Tracking resumes cookieless: the cookie needs consent() again. */
+const optIn = (): void => {
+    if (instance) {
+        instance.optIn();
+    } else if (isBrowser()) {
+        setOptedOut(false);
+    }
 };
 
 /** Identify the current visitor with user traits. Requires consent. */
@@ -138,4 +178,4 @@ export type {
     Props,
     PropValue,
 } from 'eyes-types';
-export { consent, flush, identify, init, page, revokeConsent, shutdown, track };
+export { consent, flush, identify, init, optIn, optOut, page, revokeConsent, shutdown, track };

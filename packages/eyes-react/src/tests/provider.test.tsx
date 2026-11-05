@@ -15,6 +15,8 @@ const fakeEyes = () => ({
     shutdown: vi.fn().mockResolvedValue(undefined),
     consent: vi.fn(),
     revokeConsent: vi.fn(),
+    optOut: vi.fn(),
+    optIn: vi.fn(),
     identify: vi.fn(),
 });
 

@@ -1,8 +1,6 @@
 interface EventContext {
     url: string;
     referrer?: string;
-    timezone: string;
-    language: string;
 }
 
 /** Strip the hash fragment from a URL for privacy. */
@@ -28,12 +26,7 @@ const buildContext = (): EventContext => {
     const ref = document.referrer;
     const referrer = getCrossOriginReferrer(ref);
 
-    return {
-        url,
-        referrer,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        language: navigator.language,
-    };
+    return { url, referrer };
 };
 
 /** Get a clean URL for the current page (no hash). */

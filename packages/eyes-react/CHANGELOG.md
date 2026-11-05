@@ -1,5 +1,18 @@
 # eyes-react
 
+## 0.4.0
+
+### Minor Changes
+
+- 2417ede: Add `optOut()` and `optIn()`, so a visitor can object to tracking. `useEyes()` returns both. While a browser is opted out, the tracker sends nothing.
+
+### Patch Changes
+
+- Updated dependencies [9d204f0]
+- Updated dependencies [69dacad]
+- Updated dependencies [2417ede]
+  - eyes-types@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes

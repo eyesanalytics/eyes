@@ -45,11 +45,11 @@ describe('transport', () => {
 
         expect(fetchSpy).toHaveBeenCalledOnce();
         const [url, options] = fetchSpy.mock.calls[0];
-        expect(url).toBe('https://example.com/v1/events');
+        expect(url).toBe(`https://example.com/v1/events?site_id=${TEST_SITE_ID}`);
         expect(options.method).toBe('POST');
-        expect(options.headers['X-Eyes-Site-Id']).toBe(TEST_SITE_ID);
         expect(options.keepalive).toBe(true);
-        expect(options.headers['Content-Type']).toBe('application/json');
+        // A simple CORS request: a safelisted content type and no custom header, so no preflight
+        expect(options.headers).toEqual({ 'Content-Type': 'text/plain' });
 
         const body = JSON.parse(options.body);
         expect(body).toHaveLength(2);
@@ -101,6 +101,107 @@ describe('transport', () => {
         // A keepalive request can arrive even when its promise rejects, so a second copy would
         // double count.
         expect(beaconSpy).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('retries a batch once after the Retry-After delay on a 429', async () => {
+        fetchSpy.mockResolvedValueOnce(
+            new Response(null, { status: 429, headers: { 'Retry-After': '5' } }),
+        );
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent({ name: 'limited' }));
+        await transport.flush();
+
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        await vi.advanceTimersByTimeAsync(4999);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        expect(fetchSpy.mock.calls[1][0]).toBe(fetchSpy.mock.calls[0][0]);
+        expect(JSON.parse(fetchSpy.mock.calls[1][1].body)[0].name).toBe('limited');
+    });
+
+    it('retries a 503 without Retry-After after a default delay', async () => {
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 503 }));
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent());
+        await transport.flush();
+
+        await vi.advanceTimersByTimeAsync(9999);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('reads a Retry-After date and caps the delay at a minute', async () => {
+        fetchSpy
+            .mockResolvedValueOnce(
+                new Response(null, {
+                    status: 429,
+                    headers: { 'Retry-After': new Date(Date.now() + 3000).toUTCString() },
+                }),
+            )
+            .mockResolvedValueOnce(
+                new Response(null, { status: 429, headers: { 'Retry-After': '3600' } }),
+            );
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent({ name: 'dated' }));
+        await transport.flush();
+        transport.enqueue(makeEvent({ name: 'capped' }));
+        await transport.flush();
+
+        // An HTTP date has second precision, so the delay is at most three seconds
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(fetchSpy).toHaveBeenCalledTimes(3);
+        expect(JSON.parse(fetchSpy.mock.calls[2][1].body)[0].name).toBe('dated');
+
+        await vi.advanceTimersByTimeAsync(57_000);
+        expect(fetchSpy).toHaveBeenCalledTimes(4);
+        expect(JSON.parse(fetchSpy.mock.calls[3][1].body)[0].name).toBe('capped');
+    });
+
+    it('retries a rejected batch only once', async () => {
+        fetchSpy.mockResolvedValue(
+            new Response(null, { status: 429, headers: { 'Retry-After': '1' } }),
+        );
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent());
+        await transport.flush();
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry other error responses', async () => {
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 400 }));
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent());
+        await transport.flush();
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('cancels a pending retry when stopped', async () => {
+        fetchSpy.mockResolvedValueOnce(
+            new Response(null, { status: 429, headers: { 'Retry-After': '5' } }),
+        );
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.start();
+        transport.enqueue(makeEvent());
+        await transport.flush();
+        transport.stop();
+
+        await vi.advanceTimersByTimeAsync(60_000);
         expect(fetchSpy).toHaveBeenCalledOnce();
     });
 

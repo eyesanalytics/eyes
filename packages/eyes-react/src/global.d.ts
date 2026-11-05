@@ -10,6 +10,8 @@ declare global {
             shutdown(): Promise<void>;
             consent(): void;
             revokeConsent(): void;
+            optOut(): void;
+            optIn(): void;
             identify(traits: IdentifyTraits): void;
         };
     }

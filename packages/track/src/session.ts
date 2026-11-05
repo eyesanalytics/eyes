@@ -12,6 +12,8 @@ const expireListeners = new Set<() => void>();
 // Used when sessionStorage is unavailable, so one page load still keeps one session.
 let memory: { id: string; at: number | null } | null = null;
 
+let pageLoadId: string | null = null;
+
 const read = (): { id: string | null; at: number | null } => {
     try {
         const at = Number(sessionStorage.getItem(ACTIVITY_KEY));
@@ -88,6 +90,16 @@ const sessionTimestamp = (now: number = Date.now()): number => {
     return now;
 };
 
+/**
+ * The id of this page load, the same for every event the document sends and never stored. The
+ * server files engagement and vitals on the visit this page load's pageview joined.
+ */
+const getPageLoadId = (): string => {
+    if (!pageLoadId) pageLoadId = generateId();
+
+    return pageLoadId;
+};
+
 /** Clear and regenerate the session ID. */
 const resetSession = (): string => {
     memory = null;
@@ -101,6 +113,7 @@ const resetSession = (): string => {
 };
 
 export {
+    getPageLoadId,
     getSessionId,
     onSessionExpire,
     resetSession,

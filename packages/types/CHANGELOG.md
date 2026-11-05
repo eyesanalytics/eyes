@@ -1,5 +1,16 @@
 # eyes-types
 
+## 0.4.0
+
+### Minor Changes
+
+- 2417ede: Add `optOut()` and `optIn()`, so a visitor can object to tracking. `useEyes()` returns both. While a browser is opted out, the tracker sends nothing.
+
+### Patch Changes
+
+- 9d204f0: Add the `consent_granted` event type, which the tracker sends when a visitor gives consent, so a `beforeSend` hook can see it alongside `consent_revoked`.
+- 69dacad: Add an optional `pageLoadId` to tracker events: a random id per page load, the same for every event the document sends. The server uses it to file engagement and vitals on the visit their pageview joined, now that sessions are derived on the server instead of per browser tab.
+
 ## 0.3.1
 
 ## 0.3.0

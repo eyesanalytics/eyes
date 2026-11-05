@@ -1,3 +1,4 @@
+import { isOptedOut } from '~/opt-out';
 import { touchSession } from '~/session';
 import { throttle } from '~/utils/throttle';
 
@@ -7,7 +8,9 @@ import { throttle } from '~/utils/throttle';
  * Returns a cleanup function.
  */
 const initActivity = (): (() => void) => {
-    const onActivity = throttle(() => touchSession(), 1000);
+    const onActivity = throttle(() => {
+        if (!isOptedOut()) touchSession();
+    }, 1000);
     const onVisibilityChange = () => {
         if (document.visibilityState === 'visible') onActivity();
     };

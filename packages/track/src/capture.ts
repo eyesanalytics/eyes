@@ -92,7 +92,13 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
     // Outbound link tracking
     // -----------------------------------------------------------------
     if (config.autoOutbound) {
+        // A primary click (also with ctrl or cmd) fires `click`; a middle click opens a new tab and
+        // fires `auxclick`. Each event only counts its own button, so a browser that also fires
+        // `click` for a middle click still counts it once.
         const onClick = (e: MouseEvent) => {
+            const button = e.type === 'auxclick' ? 1 : 0;
+            if (e.button !== button) return;
+
             const link = (e.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null;
             if (!link) return;
 
@@ -107,7 +113,11 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
         };
 
         document.addEventListener('click', onClick, { capture: true });
-        cleanups.push(() => document.removeEventListener('click', onClick, { capture: true }));
+        document.addEventListener('auxclick', onClick, { capture: true });
+        cleanups.push(() => {
+            document.removeEventListener('click', onClick, { capture: true });
+            document.removeEventListener('auxclick', onClick, { capture: true });
+        });
     }
 
     return () => {

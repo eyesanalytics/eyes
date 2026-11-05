@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    getPageLoadId,
     getSessionId,
     onSessionExpire,
     resetSession,
@@ -98,6 +99,22 @@ describe('session', () => {
             // The new ID should be stored
             const stored = sessionStorage.getItem('eyes_sid');
             expect(stored).toBeTruthy();
+        });
+    });
+
+    describe('getPageLoadId', () => {
+        it('keeps one id for the page load without storing it', () => {
+            const id = getPageLoadId();
+            expect(id).toMatch(/^[0-9a-f-]{36}$/);
+            expect(getPageLoadId()).toBe(id);
+            expect(Object.values({ ...sessionStorage })).not.toContain(id);
+        });
+
+        it('outlives a reset or an expired session, which do not start a new page load', () => {
+            const id = getPageLoadId();
+            resetSession();
+            touchSession(Date.now() + 2 * SESSION_TIMEOUT_MS);
+            expect(getPageLoadId()).toBe(id);
         });
     });
 

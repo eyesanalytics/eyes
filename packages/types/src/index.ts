@@ -13,12 +13,15 @@ export type EventType =
     | 'engagement'
     | 'vitals'
     | 'identify'
+    | 'consent_granted'
     | 'consent_revoked';
 
 /** Common fields shared by all event types. */
 interface BaseEvent {
     url: string;
     sessionId: string;
+    /** Random id of the page load that sent the event, so the server can file it on its visit. */
+    pageLoadId?: string;
     timestamp: number;
     eyesId?: string;
 }
@@ -60,6 +63,10 @@ export interface IdentifyEvent extends BaseEvent {
     traits: IdentifyTraits;
 }
 
+export interface ConsentGrantedEvent extends BaseEvent {
+    type: 'consent_granted';
+}
+
 export interface ConsentRevokedEvent extends BaseEvent {
     type: 'consent_revoked';
 }
@@ -71,6 +78,7 @@ export type EyesEvent =
     | EngagementEvent
     | VitalsEvent
     | IdentifyEvent
+    | ConsentGrantedEvent
     | ConsentRevokedEvent;
 
 /** Traits passed to `identify()`. `id` is the external user ID (required). */
@@ -163,6 +171,10 @@ export interface EyesContract {
     consent(): void;
     /** Revoke consent: removes eyes_id cookie, reverts to anonymous tracking. */
     revokeConsent(): void;
+    /** Opt this browser out: nothing is sent until optIn(). */
+    optOut(): void;
+    /** Opt this browser back in. Tracking resumes cookieless: the cookie needs consent() again. */
+    optIn(): void;
     /** Identify the current visitor with user traits. Requires consent. */
     identify(traits: IdentifyTraits): void;
     /** Flush all queued events to the server. */

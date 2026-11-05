@@ -25,6 +25,10 @@ export interface TypedEyesContextValue<TEvents extends DefaultEventMap> {
     track: TypedTrack<TEvents>;
     /** Track a pageview. */
     page(props?: Record<string, string | number | boolean>): void;
+    /** Opt this browser out: nothing is sent until optIn(). */
+    optOut(): void;
+    /** Opt this browser back in. Tracking resumes cookieless: the cookie needs consent() again. */
+    optIn(): void;
     /** Flush all queued events to the server. */
     flush(): Promise<void>;
     /** Stop tracking, flush remaining events, tear down. */

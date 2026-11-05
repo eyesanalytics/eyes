@@ -75,6 +75,14 @@ export const EyesProvider = ({
         callEyes(eyes => eyes.page(props));
     }, []);
 
+    const optOut: EyesContextValue['optOut'] = useCallback(() => {
+        callEyes(eyes => eyes.optOut());
+    }, []);
+
+    const optIn: EyesContextValue['optIn'] = useCallback(() => {
+        callEyes(eyes => eyes.optIn());
+    }, []);
+
     const flush: EyesContextValue['flush'] = useCallback(async () => {
         await window.Eyes?.flush();
     }, []);
@@ -84,8 +92,8 @@ export const EyesProvider = ({
     }, []);
 
     const value = useMemo<EyesContextValue>(
-        () => ({ track, page, flush, shutdown }),
-        [track, page, flush, shutdown],
+        () => ({ track, page, optOut, optIn, flush, shutdown }),
+        [track, page, optOut, optIn, flush, shutdown],
     );
 
     return <EyesContext.Provider value={value}>{children}</EyesContext.Provider>;

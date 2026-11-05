@@ -1,6 +1,6 @@
 import type { EyesEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { testEyesConfig } from '~/tests/helpers';
+import { TEST_SITE_ID, testEyesConfig } from '~/tests/helpers';
 
 // We need to reset the singleton between tests, so we import via dynamic import
 // after resetting modules each time.
@@ -60,13 +60,31 @@ describe('init (integration)', () => {
 
         expect(fetchSpy).toHaveBeenCalled();
         const [url, options] = fetchSpy.mock.calls[0];
-        expect(url).toBe('https://analytics.test/v1/events');
+        expect(url).toBe(`https://analytics.test/v1/events?site_id=${TEST_SITE_ID}`);
 
         const body: EyesEvent[] = JSON.parse(options.body);
         const signupEvent = body.find(event => event.name === 'Signup');
         expect(signupEvent).toBeDefined();
         expect(signupEvent?.type).toBe('event');
         expect(signupEvent?.props).toEqual({ plan: 'pro' });
+
+        await api.shutdown();
+    });
+
+    it('stamps every event of a page load with one page load id', async () => {
+        const { init } = await importModule();
+        const api = init(testEyesConfig({ endpoint: 'https://analytics.test' }));
+
+        api.track('Signup');
+        await api.flush();
+
+        const body: EyesEvent[] = fetchSpy.mock.calls.flatMap(([, options]) =>
+            JSON.parse(options.body),
+        );
+        expect(body.map(event => event.type)).toEqual(['pageview', 'event']);
+        expect(body[0]?.pageLoadId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(body[1]?.pageLoadId).toBe(body[0]?.pageLoadId);
+        expect(Object.values({ ...sessionStorage })).not.toContain(body[0]?.pageLoadId);
 
         await api.shutdown();
     });
@@ -192,6 +210,35 @@ describe('init (integration)', () => {
 
         const events: EyesEvent[] = fetchSpy.mock.calls.flatMap(call => JSON.parse(call[1].body));
         expect(events.map(e => e.type)).toEqual(['pageview', 'event']);
+
+        await shutdown();
+    });
+
+    it('drops a queued page() without props that the automatic pageview already recorded', async () => {
+        const { init, page, flush, shutdown } = await importModule();
+
+        page();
+        page({ section: 'thanks' });
+        init(testEyesConfig());
+        await flush();
+
+        const events: EyesEvent[] = fetchSpy.mock.calls.flatMap(call => JSON.parse(call[1].body));
+        expect(events.map(e => e.type)).toEqual(['pageview', 'pageview']);
+        expect(events[0].props).toBeUndefined();
+        expect(events[1].props).toEqual({ section: 'thanks' });
+
+        await shutdown();
+    });
+
+    it('keeps a queued page() without props when autoPageview is off', async () => {
+        const { init, page, flush, shutdown } = await importModule();
+
+        page();
+        init(testEyesConfig({ autoPageview: false }));
+        await flush();
+
+        const events: EyesEvent[] = fetchSpy.mock.calls.flatMap(call => JSON.parse(call[1].body));
+        expect(events.map(e => e.type)).toEqual(['pageview']);
 
         await shutdown();
     });
