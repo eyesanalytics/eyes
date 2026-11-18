@@ -1,15 +1,24 @@
 {
     "name": "eyes-next",
-    "version": "0.4.1",
+    "version": "0.5.0",
     "description": "Eyes Analytics: Next.js integration with automatic proxying",
     "author": "Pixel Perfect Agency",
     "license": "MIT",
+    "homepage": "https://eyes.dev",
+    "bugs": {
+        "email": "support@eyes.dev"
+    },
     "keywords": [
         "analytics",
         "nextjs",
         "next",
         "tracking",
-        "proxy"
+        "proxy",
+        "web-analytics",
+        "product-analytics",
+        "privacy",
+        "cookieless",
+        "gdpr"
     ],
     "type": "module",
     "main": "./dist/index.cjs",

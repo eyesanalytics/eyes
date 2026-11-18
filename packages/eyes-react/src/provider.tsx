@@ -17,6 +17,7 @@ export const EyesProvider = ({
     hashRouting,
     debug,
     consentRequired,
+    cookieDomain,
     beforeSend,
     children,
 }: EyesProviderProps): ReactElement => {
@@ -29,6 +30,7 @@ export const EyesProvider = ({
     if (hashRouting !== undefined) configRef.current.hashRouting = hashRouting;
     if (debug !== undefined) configRef.current.debug = debug;
     if (consentRequired !== undefined) configRef.current.consentRequired = consentRequired;
+    if (cookieDomain !== undefined) configRef.current.cookieDomain = cookieDomain;
     if (beforeSend !== undefined) configRef.current.beforeSend = beforeSend;
 
     useEffect(() => {
@@ -75,6 +77,18 @@ export const EyesProvider = ({
         callEyes(eyes => eyes.page(props));
     }, []);
 
+    const consent: EyesContextValue['consent'] = useCallback(() => {
+        callEyes(eyes => eyes.consent());
+    }, []);
+
+    const revokeConsent: EyesContextValue['revokeConsent'] = useCallback(() => {
+        callEyes(eyes => eyes.revokeConsent());
+    }, []);
+
+    const identify: EyesContextValue['identify'] = useCallback(traits => {
+        callEyes(eyes => eyes.identify(traits));
+    }, []);
+
     const optOut: EyesContextValue['optOut'] = useCallback(() => {
         callEyes(eyes => eyes.optOut());
     }, []);
@@ -92,8 +106,8 @@ export const EyesProvider = ({
     }, []);
 
     const value = useMemo<EyesContextValue>(
-        () => ({ track, page, optOut, optIn, flush, shutdown }),
-        [track, page, optOut, optIn, flush, shutdown],
+        () => ({ track, page, consent, revokeConsent, identify, optOut, optIn, flush, shutdown }),
+        [track, page, consent, revokeConsent, identify, optOut, optIn, flush, shutdown],
     );
 
     return <EyesContext.Provider value={value}>{children}</EyesContext.Provider>;

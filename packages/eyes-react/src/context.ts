@@ -9,6 +9,9 @@ const asyncNoop = () => Promise.resolve();
 export const EyesContext: Context<EyesContextValue> = createContext<EyesContextValue>({
     track: noop,
     page: noop,
+    consent: noop,
+    revokeConsent: noop,
+    identify: noop,
     optOut: noop,
     optIn: noop,
     flush: asyncNoop,

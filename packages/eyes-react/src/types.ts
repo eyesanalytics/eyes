@@ -1,4 +1,4 @@
-import type { BeforeSendHook, EyesConfig } from 'eyes-types';
+import type { BeforeSendHook, EyesConfig, IdentifyTraits } from 'eyes-types';
 
 /** Options passed to `EyesProvider` / `EyesNextProvider` (script-tag integration). */
 export interface EyesProviderProps {
@@ -36,6 +36,12 @@ export interface EyesProviderProps {
      */
     consentRequired?: boolean;
 
+    /**
+     * Cookie domain for `eyes_id`, e.g. `.example.com` to share it with your subdomains.
+     * @default the current host
+     */
+    cookieDomain?: string;
+
     /** Middleware to inspect/modify/drop events before they are queued. */
     beforeSend?: BeforeSendHook;
 
@@ -52,6 +58,7 @@ export type EyesProviderConfig = Pick<
     | 'hashRouting'
     | 'debug'
     | 'consentRequired'
+    | 'cookieDomain'
     | 'beforeSend'
 >;
 
@@ -60,6 +67,12 @@ export interface EyesContextValue {
     track(name: string, props?: Record<string, string | number | boolean>): void;
     /** Track a pageview. */
     page(props?: Record<string, string | number | boolean>): void;
+    /** Grant consent: sets the `eyes_id` cookie, so the visitor is recognised across visits. */
+    consent(): void;
+    /** Withdraw consent: removes the `eyes_id` cookie and erases the identity behind it. */
+    revokeConsent(): void;
+    /** Link the visitor to a user in your app. Dropped until consent() has been granted. */
+    identify(traits: IdentifyTraits): void;
     /** Opt this browser out: nothing is sent until optIn(). */
     optOut(): void;
     /** Opt this browser back in. Tracking resumes cookieless: the cookie needs consent() again. */

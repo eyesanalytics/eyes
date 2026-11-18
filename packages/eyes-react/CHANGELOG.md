@@ -1,5 +1,16 @@
 # eyes-react
 
+## 0.5.0
+
+### Minor Changes
+
+- 270cfe4: `useEyes()` and `createEyes()` now return `consent()`, `revokeConsent()` and `identify(traits)`, so a consent banner and a signed-in user can reach the tracker without `window.Eyes`. Calls made before the tracker script has loaded are queued and sent in order once it has, so a `consent()` followed by `identify()` is never dropped. `EyesProvider` and `EyesNextProvider` also take a `cookieDomain` prop, such as `.example.com`, to share the `eyes_id` cookie with your subdomains.
+
+### Patch Changes
+
+- ea266f5: Both packages now ship a README with install steps and a minimal example, and their `package.json` has a `homepage`, a `bugs` address and wider `keywords`, so the npm page explains the package and links to eyes.dev.
+  - eyes-types@0.5.0
+
 ## 0.4.1
 
 ### Patch Changes

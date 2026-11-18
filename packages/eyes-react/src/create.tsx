@@ -1,5 +1,6 @@
 'use client';
 
+import type { IdentifyTraits } from 'eyes-types';
 import { useContext } from 'react';
 import { EyesContext } from '~/context';
 import { callEyes } from '~/queue';
@@ -25,6 +26,12 @@ export interface TypedEyesContextValue<TEvents extends DefaultEventMap> {
     track: TypedTrack<TEvents>;
     /** Track a pageview. */
     page(props?: Record<string, string | number | boolean>): void;
+    /** Grant consent: sets the `eyes_id` cookie, so the visitor is recognised across visits. */
+    consent(): void;
+    /** Withdraw consent: removes the `eyes_id` cookie and erases the identity behind it. */
+    revokeConsent(): void;
+    /** Link the visitor to a user in your app. Dropped until consent() has been granted. */
+    identify(traits: IdentifyTraits): void;
     /** Opt this browser out: nothing is sent until optIn(). */
     optOut(): void;
     /** Opt this browser back in. Tracking resumes cookieless: the cookie needs consent() again. */

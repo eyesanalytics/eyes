@@ -116,6 +116,101 @@ describe('EyesProvider', () => {
         );
     });
 
+    it('replays consent before identify, so the identify is not dropped', async () => {
+        const { EyesProvider, useEyes } = await importModule();
+
+        // biome-ignore lint/correctness/noComponentHookFactories: the module is re-imported per test, so the component closes over it
+        const Page = () => {
+            const { consent, identify } = useEyes();
+
+            useEffect(() => {
+                consent();
+                identify({ id: 'usr_42', email: 'ada@example.com' });
+            }, [consent, identify]);
+
+            return null;
+        };
+
+        act(() => {
+            root.render(
+                <EyesProvider siteId={SITE_ID}>
+                    <Page />
+                </EyesProvider>,
+            );
+        });
+
+        const eyes = fakeEyes();
+        window.Eyes = eyes;
+        findScript()?.dispatchEvent(new Event('load'));
+
+        expect(eyes.consent).toHaveBeenCalledOnce();
+        expect(eyes.identify).toHaveBeenCalledExactlyOnceWith({
+            id: 'usr_42',
+            email: 'ada@example.com',
+        });
+        expect(eyes.init.mock.invocationCallOrder[0]).toBeLessThan(
+            eyes.consent.mock.invocationCallOrder[0],
+        );
+        expect(eyes.consent.mock.invocationCallOrder[0]).toBeLessThan(
+            eyes.identify.mock.invocationCallOrder[0],
+        );
+    });
+
+    it('revokes consent through the hook', async () => {
+        const { EyesProvider, useEyes } = await importModule();
+        const eyes = fakeEyes();
+        window.Eyes = eyes;
+        let revoke: () => void = () => {};
+
+        // biome-ignore lint/correctness/noComponentHookFactories: the module is re-imported per test, so the component closes over it
+        const Page = () => {
+            revoke = useEyes().revokeConsent;
+
+            return null;
+        };
+
+        act(() => {
+            root.render(
+                <EyesProvider siteId={SITE_ID}>
+                    <Page />
+                </EyesProvider>,
+            );
+        });
+        revoke();
+
+        expect(eyes.revokeConsent).toHaveBeenCalledOnce();
+    });
+
+    it('passes cookieDomain to init', async () => {
+        const { EyesProvider } = await importModule();
+        const eyes = fakeEyes();
+        window.Eyes = eyes;
+
+        act(() => {
+            root.render(
+                <EyesProvider siteId={SITE_ID} cookieDomain=".example.com">
+                    {null}
+                </EyesProvider>,
+            );
+        });
+
+        expect(eyes.init).toHaveBeenCalledWith(
+            expect.objectContaining({ siteId: SITE_ID, cookieDomain: '.example.com' }),
+        );
+    });
+
+    it('leaves cookieDomain out of init when it is not set', async () => {
+        const { EyesProvider } = await importModule();
+        const eyes = fakeEyes();
+        window.Eyes = eyes;
+
+        act(() => {
+            root.render(<EyesProvider siteId={SITE_ID}>{null}</EyesProvider>);
+        });
+
+        expect(eyes.init.mock.calls[0]?.[0]).not.toHaveProperty('cookieDomain');
+    });
+
     it('calls the tracker directly when the script is already loaded', async () => {
         const { createEyes, EyesProvider } = await importModule();
         const { track } = createEyes();
@@ -130,6 +225,42 @@ describe('EyesProvider', () => {
         expect(eyes.init).toHaveBeenCalledOnce();
         expect(eyes.track).toHaveBeenCalledExactlyOnceWith('Button Clicked', { id: 'cta' });
         expect(findScript()).toBeNull();
+    });
+});
+
+describe('useEyes without a provider', () => {
+    let container: HTMLDivElement;
+    let root: Root;
+
+    beforeEach(() => {
+        vi.resetModules();
+        Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+    });
+
+    afterEach(() => {
+        act(() => root.unmount());
+        container.remove();
+    });
+
+    it('returns no-op consent, revokeConsent and identify', async () => {
+        const { useEyes } = await import('~/index');
+
+        // biome-ignore lint/correctness/noComponentHookFactories: the module is re-imported per test, so the component closes over it
+        const Page = () => {
+            const { consent, revokeConsent, identify } = useEyes();
+
+            consent();
+            revokeConsent();
+            identify({ id: 'usr_42' });
+
+            return null;
+        };
+
+        expect(() => act(() => root.render(<Page />))).not.toThrow();
     });
 });
 
