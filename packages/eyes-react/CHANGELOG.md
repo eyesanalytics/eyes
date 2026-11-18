@@ -1,5 +1,12 @@
 # eyes-react
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [13c3517]
+  - eyes-types@0.4.1
+
 ## 0.4.0
 
 ### Minor Changes

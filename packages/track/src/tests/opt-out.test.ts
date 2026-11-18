@@ -49,7 +49,6 @@ describe('opt-out', () => {
         vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 Normal Browser');
 
         clearCookie();
-        sessionStorage.clear();
         localStorage.clear();
         location.hash = '';
         setGlobalPrivacyControl(undefined);
@@ -98,6 +97,7 @@ describe('opt-out', () => {
             init(testEyesConfig({ autoPageview: false }));
             consent();
             const eyesId = readEyesId();
+            fetchSpy.mockClear();
 
             optOut();
             await flush();
@@ -106,6 +106,20 @@ describe('opt-out', () => {
             const events = sentEvents();
             expect(events.map(event => event.type)).toEqual(['consent_revoked']);
             expect(events[0]?.eyesId).toBe(eyesId);
+        });
+
+        it('sends no engagement with the revocation, even with some pending', async () => {
+            const { init, consent, page, optOut, flush } = await importModule();
+            init(testEyesConfig({ autoPageview: false }));
+            consent();
+            page();
+            await vi.advanceTimersByTimeAsync(2000);
+            fetchSpy.mockClear();
+
+            optOut();
+            await flush();
+
+            expect(sentEvents().map(event => event.type)).toEqual(['consent_revoked']);
         });
 
         it('sends nothing on later page loads, including the automatic pageview', async () => {

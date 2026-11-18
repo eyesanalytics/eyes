@@ -1,9 +1,28 @@
 import type { EyesEvent, VitalMetric } from 'eyes-types';
 import type { EyesTracker } from '~/core';
-import { getPageLoadId, getSessionId, onSessionExpire, sessionTimestamp } from '~/session';
+import {
+    getPageLoadId,
+    getSessionId,
+    onSessionExpire,
+    onVisitLeave,
+    sessionTimestamp,
+} from '~/session';
 import type { Logger } from '~/utils/logger';
 
 type Rating = 'good' | 'needs-improvement' | 'poor';
+
+interface PrerenderingDocument extends Document {
+    prerendering?: boolean;
+}
+
+interface ActivatedNavigationTiming extends PerformanceNavigationTiming {
+    activationStart?: number;
+}
+
+interface Interaction {
+    id: number;
+    duration: number;
+}
 
 interface MetricThresholds {
     good: number;
@@ -29,6 +48,11 @@ const MAX_VALUES: Record<string, number> = {
     inp: 60_000,
 };
 
+// INP is the 98th percentile of a page's interactions: the longest one, then the next longest for
+// every 50 interactions. Below 500 interactions that is always one of the 10 longest, so only those
+// are kept, like the web-vitals library does, and past that the 10th longest stands in.
+const MAX_INTERACTIONS = 10;
+
 const rate = (name: string, value: number): Rating => {
     const t = THRESHOLDS[name];
     if (!t) return 'good';
@@ -39,8 +63,11 @@ const rate = (name: string, value: number): Rating => {
 
 /**
  * Observe Core Web Vitals and dispatch them as a single `vitals` event.
- * Metrics are buffered and flushed together when the page is hidden, so one
- * page load produces one event instead of one per metric.
+ * Metrics are buffered and flushed together when the page is first hidden, so one
+ * page load produces one event instead of one per metric. That makes INP and CLS
+ * final at the first hide: once the event is sent every observer is disconnected,
+ * and interactions or layout shifts after it are not measured.
+ * A prerendered page is measured from its activation, when the visitor sees it.
  * Uses PerformanceObserver where available.
  * Returns a cleanup function.
  */
@@ -49,6 +76,7 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
 
     const observers: PerformanceObserver[] = [];
     const metrics = new Map<string, VitalMetric>();
+    const prerenderingDocument = document as PrerenderingDocument;
 
     // TTFB, FCP and LCP belong to this document load, so the event is filed under the URL the
     // document loaded with, not whichever SPA route is active when the page is hidden.
@@ -59,10 +87,20 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     const supportsLayoutShift =
         PerformanceObserver.supportedEntryTypes?.includes('layout-shift') ?? false;
 
+    // A prerendering page reports itself hidden, but the visitor only sees it from its activation,
+    // so until then it does not count as hidden.
+    const isHidden = (): boolean =>
+        document.visibilityState === 'hidden' && !prerenderingDocument.prerendering;
+
     // Paint metrics are only valid if the page stayed visible until the paint.
     // A tab that loads in the background paints when it is first revealed, and
     // that paint's startTime is measured from the original navigation.
-    let firstHiddenTime = document.visibilityState === 'hidden' ? 0 : Number.POSITIVE_INFINITY;
+    let firstHiddenTime = isHidden() ? 0 : Number.POSITIVE_INFINITY;
+
+    // A prerendered page that is activated in the background has been hidden all along.
+    const onActivation = (): void => {
+        if (isHidden()) firstHiddenTime = 0;
+    };
 
     const collect = (name: string, value: number): void => {
         if (metrics.has(name)) return;
@@ -91,22 +129,20 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     // -----------------------------------------------------------------
     // TTFB: Time to First Byte
     // -----------------------------------------------------------------
+    // A prerendering page gets this entry before its activation, while its activationStart is
+    // still 0. The entry fills it in at activation, so TTFB is worked out at the flush.
+    let navigation: ActivatedNavigationTiming | undefined;
     observe('navigation', entries => {
-        const navigation = entries[0] as
-            | (PerformanceNavigationTiming & { activationStart?: number })
-            | undefined;
-        if (navigation?.responseStart) {
-            const activationStart = navigation.activationStart ?? 0;
-            collect('ttfb', navigation.responseStart - activationStart);
-        }
+        navigation ??= entries[0] as ActivatedNavigationTiming | undefined;
     });
 
     // -----------------------------------------------------------------
     // FCP: First Contentful Paint
     // -----------------------------------------------------------------
+    let fcpValue: number | undefined;
     observe('paint', entries => {
         const fcp = entries.find(entry => entry.name === 'first-contentful-paint');
-        if (fcp && fcp.startTime < firstHiddenTime) collect('fcp', fcp.startTime);
+        if (fcp && fcp.startTime < firstHiddenTime) fcpValue ??= fcp.startTime;
     });
 
     // -----------------------------------------------------------------
@@ -160,8 +196,10 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     // -----------------------------------------------------------------
     // INP: Interaction to Next Paint
     // -----------------------------------------------------------------
-    let inpValue = 0;
-    const interactions = new Map<number, number>();
+    // The longest interactions, longest first, and how many the page has had.
+    const interactions: Interaction[] = [];
+    let interactionCount = 0;
+    let lastInteractionId = 0;
 
     const recordInteractions = (
         entries: (PerformanceEntry & { interactionId?: number; duration: number })[],
@@ -171,19 +209,17 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
             const id = entry.interactionId || (entry.entryType === 'first-input' ? -1 : 0);
             if (!id) continue;
 
-            // A 0 ms interaction (a touch tap in WebKit) still is a sample, so compare against a
-            // missing entry, not against 0.
-            const existing = interactions.get(id);
-            if (existing === undefined || entry.duration > existing) {
-                interactions.set(id, entry.duration);
-            }
-        }
+            // Interaction ids only go up, so an id above every earlier one is a new interaction.
+            // A page has one first input, so its stand-in id is new as well.
+            if (id < 0 || id > lastInteractionId) interactionCount++;
+            lastInteractionId = Math.max(lastInteractionId, id);
 
-        // INP = p98 of interaction durations
-        if (interactions.size > 0) {
-            const sorted = [...interactions.values()].sort((a, b) => b - a);
-            const idx = Math.min(sorted.length - 1, Math.floor(sorted.length / 50));
-            inpValue = sorted[idx];
+            const existing = interactions.find(interaction => interaction.id === id);
+            if (existing) existing.duration = Math.max(existing.duration, entry.duration);
+            if (!existing) interactions.push({ id, duration: entry.duration });
+
+            interactions.sort((a, b) => b.duration - a.duration);
+            interactions.splice(MAX_INTERACTIONS);
         }
     };
 
@@ -206,15 +242,37 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     // -----------------------------------------------------------------
     let sent = false;
 
+    // Once the event is sent nothing more is measured, so the observers and the interactions they
+    // gathered can go.
+    const stop = (): void => {
+        sent = true;
+        for (const observer of observers) observer.disconnect();
+        interactions.length = 0;
+    };
+
     const flush = (): void => {
+        if (prerenderingDocument.prerendering) return;
+
+        // Read first: once the eyes_id has gone, the page leaves its visit, which ends its vitals
+        const eyesId = tracker.eventEyesId();
         if (sent) return;
 
-        if (lcpValue > 0) collect('lcp', lcpValue);
+        // A prerendered page is shown at its activation, so its response and paints count from
+        // there. One that came before the activation counts as 0: the visitor never waited for it.
+        const activationStart = navigation?.activationStart ?? 0;
+        const sinceActivation = (time: number): number => Math.max(0, time - activationStart);
+
+        if (navigation?.responseStart) collect('ttfb', sinceActivation(navigation.responseStart));
+        if (fcpValue !== undefined) collect('fcp', sinceActivation(fcpValue));
+        if (lcpValue > 0) collect('lcp', sinceActivation(lcpValue));
         if (supportsLayoutShift) collect('cls', clsValue);
-        if (interactions.size > 0) collect('inp', inpValue);
+
+        const inp =
+            interactions[Math.min(interactions.length - 1, Math.floor(interactionCount / 50))];
+        if (inp) collect('inp', inp.duration);
 
         if (metrics.size === 0) return;
-        sent = true;
+        stop();
 
         const collected = [...metrics.values()];
         logger.event('vitals', { metrics: collected });
@@ -222,6 +280,7 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
         const event: EyesEvent = {
             type: 'vitals',
             url: documentUrl,
+            eyesId,
             sessionId: getSessionId(),
             pageLoadId: getPageLoadId(),
             timestamp: sessionTimestamp(),
@@ -232,7 +291,7 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     };
 
     const onVisibilityChange = (): void => {
-        if (document.visibilityState !== 'hidden') return;
+        if (!isHidden()) return;
 
         firstHiddenTime = Math.min(firstHiddenTime, performance.now());
         flush();
@@ -241,16 +300,24 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     // After a back/forward cache restore every timestamp is still relative to
     // the original navigation, so nothing measured afterwards is trustworthy.
     const onPageShow = (event: PageTransitionEvent): void => {
-        if (event.persisted) sent = true;
+        if (event.persisted) stop();
     };
 
     // The document's vitals belong to the visit it loaded in. When activity ends that visit, send
     // them on its session and stop, so a later hide does not file them on the next session.
     const offSessionExpire = onSessionExpire(() => {
         flush();
-        sent = true;
+        stop();
     });
 
+    // The same holds when the page leaves its visit: send them on it while it can take them, then
+    // stop, since a vitals row alone would count as a visit on the session that follows.
+    const offVisitLeave = onVisitLeave(report => {
+        if (report) flush();
+        stop();
+    });
+
+    document.addEventListener('prerenderingchange', onActivation);
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', flush);
     window.addEventListener('pageshow', onPageShow);
@@ -258,6 +325,8 @@ const initVitals = (tracker: EyesTracker, logger: Logger): (() => void) => {
     return () => {
         for (const obs of observers) obs.disconnect();
         offSessionExpire();
+        offVisitLeave();
+        document.removeEventListener('prerenderingchange', onActivation);
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('pagehide', flush);
         window.removeEventListener('pageshow', onPageShow);

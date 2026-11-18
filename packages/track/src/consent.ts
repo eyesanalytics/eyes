@@ -67,8 +67,9 @@ const createConsentManager = (consentRequired: boolean, cookieDomain?: string): 
         current = 'granted';
     }
 
+    // A granted state whose cookie is gone, removed by a withdrawal in another tab, grants again
     const grant = (): void => {
-        if (current === 'granted') return;
+        if (current === 'granted' && getEyesId()) return;
         current = 'granted';
         if (!consentRequired) setRevoked(false);
         const existing = getEyesId();
@@ -83,13 +84,20 @@ const createConsentManager = (consentRequired: boolean, cookieDomain?: string): 
         removeEyesId(cookieDomain);
     };
 
+    // Consent given in another tab holds in this one, whose visit it has moved to the eyes_id.
+    const state = (): ConsentState => {
+        if (current === 'pending' && getEyesId()) current = 'granted';
+
+        return current;
+    };
+
     const eyesId = (): string | null => {
-        if (current !== 'granted') return null;
+        if (state() !== 'granted') return null;
         return getEyesId();
     };
 
     return {
-        state: () => current,
+        state,
         grant,
         revoke,
         eyesId,

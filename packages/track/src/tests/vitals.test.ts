@@ -2,7 +2,7 @@ import type { EyesEvent, VitalMetric, VitalsEvent } from 'eyes-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '~/config';
 import type { EyesTracker } from '~/core';
-import { touchSession } from '~/session';
+import { getPageLoadId, leaveVisit, resetSession, touchSession } from '~/session';
 import { TEST_SITE_ID } from '~/tests/helpers';
 import { initVitals } from '~/vitals';
 
@@ -10,6 +10,7 @@ const noopLogger = { info: vi.fn(), event: vi.fn(), warn: vi.fn() };
 
 const makeTracker = () => ({
     send: vi.fn<(event: EyesEvent) => void>(),
+    eventEyesId: vi.fn<() => string | undefined>(),
     currentUrl: vi.fn(() => 'https://example.com/page'),
     page: vi.fn(),
     track: vi.fn(),
@@ -83,6 +84,31 @@ const hidePage = () => {
     document.dispatchEvent(new Event('visibilitychange'));
 };
 
+const setPrerendering = (value: boolean) => {
+    Object.defineProperty(document, 'prerendering', { value, configurable: true });
+};
+
+// A page that prerenders is hidden until its activation, which shows it (or leaves it in a
+// background tab)
+const startPrerendering = () => {
+    setPrerendering(true);
+    setVisibilityState('hidden');
+};
+
+const activate = (visibility: 'visible' | 'hidden' = 'visible') => {
+    setPrerendering(false);
+    setVisibilityState(visibility);
+    document.dispatchEvent(new Event('prerenderingchange'));
+};
+
+// Interactions with ids that go up by 7, as Chromium assigns them
+const interactionEntries = (durations: number[]) =>
+    durations.map((duration, index) => ({
+        interactionId: (index + 1) * 7,
+        duration,
+        startTime: index * 100,
+    }));
+
 // Extract the single vitals event the tracker should have sent
 const sentVitals = (tracker: ReturnType<typeof makeTracker>): VitalsEvent => {
     expect(tracker.send).toHaveBeenCalledOnce();
@@ -97,7 +123,8 @@ const metric = (event: VitalsEvent, name: string): VitalMetric | undefined =>
 describe('vitals', () => {
     beforeEach(() => {
         setupPerformanceObserverMock();
-        sessionStorage.clear();
+        resetSession();
+        setPrerendering(false);
         setVisibilityState('visible');
     });
 
@@ -401,6 +428,55 @@ describe('vitals', () => {
         cleanup();
     });
 
+    it('reports INP as the p98 interaction once there are more than 50', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        // 150 interactions of 16 to 165 ms: p98 is the 4th longest (index floor(150 / 50) = 3)
+        const durations = Array.from({ length: 150 }, (_, index) => index + 16);
+        fireEntries('event', interactionEntries(durations));
+        hidePage();
+
+        expect(metric(sentVitals(tracker), 'inp')?.value).toBe(162);
+
+        cleanup();
+    });
+
+    it('counts an interaction once across all of its entries', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        // 100 interactions that each report a pointerdown and a click, and a first input that
+        // repeats the first one: p98 is the 3rd longest (index floor(100 / 50) = 2)
+        const entries = interactionEntries(Array.from({ length: 100 }, (_, index) => index + 16));
+        fireEntries('first-input', [{ ...entries[0], entryType: 'first-input' }]);
+        fireEntries(
+            'event',
+            entries.flatMap(entry => [entry, { ...entry, duration: entry.duration - 1 }]),
+        );
+        hidePage();
+
+        expect(metric(sentVitals(tracker), 'inp')?.value).toBe(113);
+
+        cleanup();
+    });
+
+    it('keeps the 10 longest interactions, so past 500 the 10th longest is INP', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        // 600 interactions of 16 to 615 ms over several callbacks, the longest in the first one
+        const entries = interactionEntries(Array.from({ length: 600 }, (_, index) => 615 - index));
+        for (let start = 0; start < entries.length; start += 100) {
+            fireEntries('event', entries.slice(start, start + 100));
+        }
+        hidePage();
+
+        expect(metric(sentVitals(tracker), 'inp')?.value).toBe(606);
+
+        cleanup();
+    });
+
     it('files vitals under the URL the document loaded with, not a later SPA route', () => {
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
@@ -416,8 +492,7 @@ describe('vitals', () => {
 
     it('stamps the event with the last activity once the session has expired', () => {
         const lastActivity = Date.now() - 45 * 60 * 1000;
-        sessionStorage.setItem('eyes_sid', 'idle-session');
-        sessionStorage.setItem('eyes_sid_at', String(lastActivity));
+        const idleSession = touchSession(lastActivity);
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
@@ -426,15 +501,14 @@ describe('vitals', () => {
 
         const event = sentVitals(tracker);
         expect(event.timestamp).toBe(lastActivity);
-        expect(event.sessionId).toBe('idle-session');
+        expect(event.sessionId).toBe(idleSession);
 
         cleanup();
     });
 
     it('sends vitals on the ended session when activity after idling starts a new one', () => {
         const lastActivity = Date.now() - 45 * 60 * 1000;
-        sessionStorage.setItem('eyes_sid', 'idle-session');
-        sessionStorage.setItem('eyes_sid_at', String(lastActivity));
+        const idleSession = touchSession(lastActivity);
         const tracker = makeTracker();
         const cleanup = initVitals(asTracker(tracker), noopLogger);
 
@@ -443,10 +517,72 @@ describe('vitals', () => {
         hidePage();
 
         const event = sentVitals(tracker);
-        expect(event.sessionId).toBe('idle-session');
+        expect(event.sessionId).toBe(idleSession);
         expect(event.timestamp).toBe(lastActivity);
 
         cleanup();
+    });
+
+    describe('when the page leaves its visit', () => {
+        it('sends the vitals on the visit while it can take them, then stops', () => {
+            const session = touchSession();
+            const pageLoad = getPageLoadId();
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+            leaveVisit(true);
+            hidePage();
+
+            expect(tracker.send).toHaveBeenCalledOnce();
+            const event = sentVitals(tracker);
+            expect(event.sessionId).toBe(session);
+            expect(event.pageLoadId).toBe(pageLoad);
+
+            cleanup();
+        });
+
+        it('drops them when the visit can no longer take them', () => {
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+            leaveVisit(false);
+            hidePage();
+
+            expect(tracker.send).not.toHaveBeenCalled();
+
+            cleanup();
+        });
+
+        it('leaves before it builds the event once the eyes_id has gone', () => {
+            const tracker = makeTracker();
+            tracker.eventEyesId.mockImplementation(() => {
+                leaveVisit(false);
+                return undefined;
+            });
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+            hidePage();
+
+            expect(tracker.send).not.toHaveBeenCalled();
+
+            cleanup();
+        });
+
+        it('disconnects every observer once it has left', () => {
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            leaveVisit(false);
+
+            for (const obs of mockObservers) {
+                expect(obs.disconnect).toHaveBeenCalledOnce();
+            }
+
+            cleanup();
+        });
     });
 
     it('cleanup disconnects all observers', () => {
@@ -458,6 +594,149 @@ describe('vitals', () => {
         for (const obs of mockObservers) {
             expect(obs.disconnect).toHaveBeenCalled();
         }
+    });
+
+    it('disconnects every observer once the event is sent', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        fireEntries('navigation', [{ responseStart: 250, activationStart: 0 }]);
+        fireEntries('event', [{ interactionId: 1, duration: 300, startTime: 100 }]);
+
+        expect(mockObservers.length).toBeGreaterThan(0);
+        for (const obs of mockObservers) {
+            expect(obs.disconnect).not.toHaveBeenCalled();
+        }
+
+        hidePage();
+
+        expect(tracker.send).toHaveBeenCalledOnce();
+        for (const obs of mockObservers) {
+            expect(obs.disconnect).toHaveBeenCalledOnce();
+        }
+
+        cleanup();
+    });
+
+    it('keeps observing when there was nothing to send at the first hide', () => {
+        supportedEntryTypes = supportedEntryTypes.filter(type => type !== 'layout-shift');
+        setupPerformanceObserverMock();
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        hidePage();
+
+        for (const obs of mockObservers) {
+            expect(obs.disconnect).not.toHaveBeenCalled();
+        }
+
+        supportedEntryTypes = [...supportedEntryTypes, 'layout-shift'];
+        cleanup();
+    });
+
+    it('disconnects every observer after a back/forward cache restore', () => {
+        const tracker = makeTracker();
+        const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+        window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+
+        for (const obs of mockObservers) {
+            expect(obs.disconnect).toHaveBeenCalledOnce();
+        }
+
+        cleanup();
+    });
+
+    describe('prerendered pages', () => {
+        it('collects FCP and LCP, measured from the activation', () => {
+            startPrerendering();
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 300, activationStart: 2990 }]);
+            activate();
+            // Chrome paints a prerendered page once it is shown
+            fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 3040 }]);
+            fireEntries('largest-contentful-paint', [{ startTime: 3200 }]);
+            hidePage();
+
+            const event = sentVitals(tracker);
+            expect(metric(event, 'fcp')?.value).toBe(50); // 3040 - 2990
+            expect(metric(event, 'lcp')?.value).toBe(210); // 3200 - 2990
+
+            cleanup();
+        });
+
+        it('reports TTFB 0 when the response came before the activation', () => {
+            startPrerendering();
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            // The entry arrives while the page prerenders and gets its activationStart later
+            const navigation = { responseStart: 300, activationStart: 0 };
+            fireEntries('navigation', [navigation]);
+            activate();
+            navigation.activationStart = 2990;
+            hidePage();
+
+            const ttfb = metric(sentVitals(tracker), 'ttfb');
+            expect(ttfb?.value).toBe(0);
+            expect(ttfb?.rating).toBe('good');
+
+            cleanup();
+        });
+
+        it('reports FCP and LCP 0 when they painted before the activation', () => {
+            startPrerendering();
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 300, activationStart: 2990 }]);
+            fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 400 }]);
+            fireEntries('largest-contentful-paint', [{ startTime: 600 }]);
+            activate();
+            hidePage();
+
+            const event = sentVitals(tracker);
+            expect(metric(event, 'fcp')?.value).toBe(0);
+            expect(metric(event, 'lcp')?.value).toBe(0);
+
+            cleanup();
+        });
+
+        it('does not send while the page is still prerendering', () => {
+            startPrerendering();
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 300, activationStart: 0 }]);
+            document.dispatchEvent(new Event('visibilitychange'));
+            window.dispatchEvent(new Event('pagehide'));
+
+            expect(tracker.send).not.toHaveBeenCalled();
+            // Nor does it look for the eyes_id, which could make the page leave its visit.
+            expect(tracker.eventEyesId).not.toHaveBeenCalled();
+
+            cleanup();
+        });
+
+        it('discards paint metrics when the page is activated in the background', () => {
+            startPrerendering();
+            const tracker = makeTracker();
+            const cleanup = initVitals(asTracker(tracker), noopLogger);
+
+            fireEntries('navigation', [{ responseStart: 300, activationStart: 2990 }]);
+            activate('hidden');
+            // The background tab is revealed much later, and paints then
+            setVisibilityState('visible');
+            fireEntries('paint', [{ name: 'first-contentful-paint', startTime: 67_059_280 }]);
+            fireEntries('largest-contentful-paint', [{ startTime: 67_059_280 }]);
+            hidePage();
+
+            expect(sentVitals(tracker).metrics.map(m => m.name)).toEqual(['ttfb', 'cls']);
+
+            cleanup();
+        });
     });
 
     describe('rate thresholds', () => {

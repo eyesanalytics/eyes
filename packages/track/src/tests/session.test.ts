@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
     getPageLoadId,
     getSessionId,
+    leaveVisit,
     onSessionExpire,
+    onVisitLeave,
     resetSession,
     SESSION_TIMEOUT_MS,
     sessionTimestamp,
@@ -11,14 +13,16 @@ import {
 
 describe('session', () => {
     beforeEach(() => {
+        resetSession();
         sessionStorage.clear();
     });
 
-    it('creates and persists a session ID', () => {
+    it('creates a session ID without storing it', () => {
         const id = getSessionId();
         expect(typeof id).toBe('string');
         expect(id.length).toBeGreaterThan(0);
-        expect(sessionStorage.getItem('eyes_sid')).toBe(id);
+        touchSession();
+        expect(sessionStorage).toHaveLength(0);
     });
 
     it('returns the same ID on subsequent calls', () => {
@@ -52,7 +56,7 @@ describe('session', () => {
             const start = 1_790_000_000_000;
             const first = touchSession(start);
             expect(getSessionId()).toBe(first);
-            expect(sessionStorage.getItem('eyes_sid_at')).toBe(String(start));
+            expect(sessionTimestamp(start + SESSION_TIMEOUT_MS + 1)).toBe(start);
         });
 
         it('lets listeners see the expired session before activity replaces it', () => {
@@ -93,12 +97,13 @@ describe('session', () => {
             expect(second).not.toBe(first);
         });
 
-        it('clears the old session from storage', () => {
-            getSessionId();
+        it('forgets the last activity of the old session', () => {
+            const start = 1_790_000_000_000;
+            touchSession(start);
             resetSession();
-            // The new ID should be stored
-            const stored = sessionStorage.getItem('eyes_sid');
-            expect(stored).toBeTruthy();
+            expect(sessionTimestamp(start + 2 * SESSION_TIMEOUT_MS)).toBe(
+                start + 2 * SESSION_TIMEOUT_MS,
+            );
         });
     });
 
@@ -118,22 +123,33 @@ describe('session', () => {
         });
     });
 
-    describe('when sessionStorage is unavailable', () => {
-        it('returns a generated ID without throwing', () => {
-            vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-                throw new Error('SecurityError');
-            });
-            vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-                throw new Error('SecurityError');
-            });
+    describe('leaveVisit', () => {
+        it('starts a new session and page load after listeners saw the old ones', () => {
+            const session = touchSession();
+            const pageLoad = getPageLoadId();
+            const seen: { report: boolean; session: string; pageLoad: string }[] = [];
+            const off = onVisitLeave(report =>
+                seen.push({ report, session: getSessionId(), pageLoad: getPageLoadId() }),
+            );
 
-            const id = getSessionId();
-            expect(typeof id).toBe('string');
-            expect(id.length).toBeGreaterThan(0);
-            // One page load keeps one session even without storage
-            expect(getSessionId()).toBe(id);
+            leaveVisit(true);
 
-            vi.restoreAllMocks();
+            expect(seen).toEqual([{ report: true, session, pageLoad }]);
+            expect(getSessionId()).not.toBe(session);
+            expect(getPageLoadId()).not.toBe(pageLoad);
+
+            off();
+            leaveVisit(false);
+            expect(seen).toHaveLength(1);
+        });
+
+        it('forgets the last activity of the visit it leaves', () => {
+            const start = 1_790_000_000_000;
+            touchSession(start);
+            leaveVisit(false);
+            expect(sessionTimestamp(start + 2 * SESSION_TIMEOUT_MS)).toBe(
+                start + 2 * SESSION_TIMEOUT_MS,
+            );
         });
     });
 });

@@ -38,7 +38,6 @@ describe('consent', () => {
         vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 Normal Browser');
 
         clearCookie();
-        sessionStorage.clear();
         localStorage.clear();
     });
 

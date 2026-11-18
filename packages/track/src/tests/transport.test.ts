@@ -17,6 +17,33 @@ const noopLogger = { info: vi.fn(), event: vi.fn(), warn: vi.fn() };
 
 const makeConfig = (overrides = {}) => resolveConfig(testEyesConfig(overrides));
 
+const makeLogger = () => ({ info: vi.fn(), event: vi.fn(), warn: vi.fn() });
+
+const setVisibility = (state: DocumentVisibilityState): void => {
+    Object.defineProperty(document, 'visibilityState', {
+        value: state,
+        configurable: true,
+        writable: true,
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+};
+
+const rateLimited = (retryAfter = '5') =>
+    new Response(null, { status: 429, headers: { 'Retry-After': retryAfter } });
+
+/** A fetch that stays in flight until the returned function settles it. */
+const pendingFetch = (spy: ReturnType<typeof vi.fn>): (() => void) => {
+    let settle = () => {};
+    spy.mockImplementationOnce(
+        () =>
+            new Promise<Response>(resolve => {
+                settle = () => resolve(new Response());
+            }),
+    );
+
+    return () => settle();
+};
+
 describe('transport', () => {
     let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -57,6 +84,40 @@ describe('transport', () => {
         expect(body[1].name).toBe('signup');
     });
 
+    it('stamps every event with the time its batch is sent', async () => {
+        vi.setSystemTime(1_750_000_000_000);
+        const transport = createTransport(makeConfig(), noopLogger);
+
+        transport.enqueue(makeEvent({ name: 'early', timestamp: 1_749_999_990_000 }));
+        transport.enqueue(makeEvent({ name: 'late', timestamp: 1_749_999_995_000 }));
+        vi.setSystemTime(1_750_000_002_000);
+        await transport.flush();
+
+        const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+        expect(body).toEqual([
+            expect.objectContaining({ timestamp: 1_749_999_990_000, sentAt: 1_750_000_002_000 }),
+            expect.objectContaining({ timestamp: 1_749_999_995_000, sentAt: 1_750_000_002_000 }),
+        ]);
+    });
+
+    it('stamps a retried batch with the time of the retry', async () => {
+        vi.setSystemTime(1_750_000_000_000);
+        fetchSpy.mockResolvedValueOnce(
+            new Response(null, { status: 429, headers: { 'Retry-After': '5' } }),
+        );
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent({ timestamp: 1_750_000_000_000 }));
+        await transport.flush();
+        await vi.advanceTimersByTimeAsync(5000);
+
+        expect(JSON.parse(fetchSpy.mock.calls[0][1].body)[0].sentAt).toBe(1_750_000_000_000);
+        expect(JSON.parse(fetchSpy.mock.calls[1][1].body)[0]).toMatchObject({
+            timestamp: 1_750_000_000_000,
+            sentAt: 1_750_000_005_000,
+        });
+    });
+
     it('does not flush when queue is empty', async () => {
         const transport = createTransport(makeConfig(), noopLogger);
         await transport.flush();
@@ -87,6 +148,83 @@ describe('transport', () => {
         expect(fetchSpy).toHaveBeenCalledOnce();
 
         transport.stop();
+    });
+
+    it('runs no flush timer while the queue is empty', async () => {
+        const transport = createTransport(makeConfig({ flushInterval: 2000 }), noopLogger);
+        transport.start();
+        expect(vi.getTimerCount()).toBe(0);
+
+        transport.enqueue(makeEvent());
+        transport.enqueue(makeEvent());
+        expect(vi.getTimerCount()).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+        expect(JSON.parse(fetchSpy.mock.calls[0][1].body)).toHaveLength(2);
+        expect(vi.getTimerCount()).toBe(0);
+
+        transport.stop();
+    });
+
+    it('gives events queued while a flush is in flight a timer of their own', async () => {
+        const settle = pendingFetch(fetchSpy);
+        const transport = createTransport(makeConfig({ flushInterval: 2000 }), noopLogger);
+        transport.start();
+
+        transport.enqueue(makeEvent({ name: 'first' }));
+        await vi.advanceTimersByTimeAsync(2000);
+        transport.enqueue(makeEvent({ name: 'second' }));
+        expect(vi.getTimerCount()).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        const body = JSON.parse(fetchSpy.mock.calls[1][1].body);
+        expect(body).toHaveLength(1);
+        expect(body[0].name).toBe('second');
+
+        settle();
+        transport.stop();
+    });
+
+    it('cancels the flush timer when the queue is flushed by hand or by batch size', async () => {
+        const transport = createTransport(
+            makeConfig({ flushInterval: 2000, maxBatchSize: 2 }),
+            noopLogger,
+        );
+        transport.start();
+
+        transport.enqueue(makeEvent());
+        await transport.flush();
+        expect(vi.getTimerCount()).toBe(0);
+
+        transport.enqueue(makeEvent());
+        transport.enqueue(makeEvent());
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        expect(vi.getTimerCount()).toBe(0);
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+        transport.stop();
+    });
+
+    it('arms the flush timer from start until stop only', async () => {
+        const transport = createTransport(makeConfig({ flushInterval: 2000 }), noopLogger);
+
+        // Queued before start: flushed on the first timer
+        transport.enqueue(makeEvent({ name: 'early' }));
+        expect(vi.getTimerCount()).toBe(0);
+        transport.start();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(JSON.parse(fetchSpy.mock.calls[0][1].body)[0].name).toBe('early');
+
+        // Queued after stop: no timer, but a flush by hand still sends it
+        transport.stop();
+        transport.enqueue(makeEvent({ name: 'late' }));
+        expect(vi.getTimerCount()).toBe(0);
+        await transport.flush();
+        expect(JSON.parse(fetchSpy.mock.calls[1][1].body)[0].name).toBe('late');
     });
 
     it('does not resend a batch when fetch rejects', async () => {
@@ -190,6 +328,127 @@ describe('transport', () => {
         expect(fetchSpy).toHaveBeenCalledOnce();
     });
 
+    it('logs the status and the reason of every refused batch in debug mode', async () => {
+        fetchSpy
+            .mockResolvedValueOnce(
+                new Response('Payload contains no valid events.', { status: 400 }),
+            )
+            .mockResolvedValueOnce(rateLimited('1'))
+            .mockResolvedValueOnce(new Response('Too many requests.', { status: 429 }));
+        const logger = makeLogger();
+
+        const transport = createTransport(makeConfig({ debug: true }), logger);
+        transport.enqueue(makeEvent());
+        await transport.flush();
+        transport.enqueue(makeEvent());
+        await transport.flush();
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(logger.warn.mock.calls).toEqual([
+            ['Server refused 1 event(s) with status 400', 'Payload contains no valid events.'],
+            ['Server refused 1 event(s) with status 429', ''],
+            ['Server refused 1 event(s) with status 429', 'Too many requests.'],
+        ]);
+    });
+
+    it('does not read the response of a refused batch outside debug mode', async () => {
+        const response = new Response('Payload contains no valid events.', { status: 400 });
+        const text = vi.spyOn(response, 'text');
+        fetchSpy.mockResolvedValueOnce(response);
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.enqueue(makeEvent());
+        await transport.flush();
+
+        expect(text).not.toHaveBeenCalled();
+    });
+
+    it('sends a batch waiting for its retry as a beacon when the page is hidden, once', async () => {
+        fetchSpy.mockResolvedValueOnce(rateLimited());
+        const beaconSpy = vi.fn().mockReturnValue(true);
+        navigator.sendBeacon = beaconSpy;
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.start();
+        transport.enqueue(makeEvent({ name: 'limited' }));
+        await transport.flush();
+        vi.advanceTimersByTime(2000);
+
+        // Stamped with the time it goes out, like a retry from the timer
+        setVisibility('hidden');
+        expect(beaconSpy).toHaveBeenCalledOnce();
+        expect(JSON.parse(beaconSpy.mock.calls[0][1])[0]).toMatchObject({
+            name: 'limited',
+            sentAt: Date.now(),
+        });
+
+        // The page comes back and goes again: the batch has had its one resend
+        setVisibility('visible');
+        setVisibility('hidden');
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(beaconSpy).toHaveBeenCalledOnce();
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        setVisibility('visible');
+        transport.stop();
+    });
+
+    it('sends a waiting batch with fetch on pagehide when the beacon is refused, once', async () => {
+        fetchSpy.mockResolvedValue(rateLimited());
+        navigator.sendBeacon = vi.fn().mockReturnValue(false);
+
+        const transport = createTransport(makeConfig(), noopLogger);
+        transport.start();
+        transport.enqueue(makeEvent({ name: 'limited' }));
+        await transport.flush();
+
+        window.dispatchEvent(new Event('pagehide'));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        expect(JSON.parse(fetchSpy.mock.calls[1][1].body)[0].name).toBe('limited');
+
+        // Refused again, and not sent a third time
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+        transport.stop();
+    });
+
+    it('sends a body over the keepalive quota without keepalive, counting bytes', async () => {
+        const transport = createTransport(makeConfig(), noopLogger);
+
+        // 20,000 characters, but 60,000 bytes of UTF-8
+        transport.enqueue(makeEvent({ props: { note: '€'.repeat(20_000) } }));
+        await transport.flush();
+        transport.enqueue(makeEvent());
+        await transport.flush();
+
+        expect(fetchSpy.mock.calls[0][1].keepalive).toBe(false);
+        expect(fetchSpy.mock.calls[1][1].keepalive).toBe(true);
+    });
+
+    it('keeps the keepalive requests in flight under the quota together', async () => {
+        const settle = pendingFetch(fetchSpy);
+        const transport = createTransport(makeConfig(), noopLogger);
+        const batch = () => makeEvent({ props: { note: 'x'.repeat(30_000) } });
+
+        transport.enqueue(batch());
+        transport.flush();
+        transport.enqueue(batch());
+        await transport.flush();
+
+        settle();
+        await vi.advanceTimersByTimeAsync(0);
+        transport.enqueue(batch());
+        await transport.flush();
+
+        expect(fetchSpy.mock.calls.map(([, options]) => options.keepalive)).toEqual([
+            true,
+            false,
+            true,
+        ]);
+    });
+
     it('cancels a pending retry when stopped', async () => {
         fetchSpy.mockResolvedValueOnce(
             new Response(null, { status: 429, headers: { 'Retry-After': '5' } }),
@@ -218,7 +477,10 @@ describe('transport', () => {
         expect(beaconSpy.mock.calls[0][0]).toBe(
             `https://example.com/v1/events?site_id=${TEST_SITE_ID}`,
         );
-        expect(JSON.parse(beaconSpy.mock.calls[0][1])[0].name).toBe('leave');
+        expect(JSON.parse(beaconSpy.mock.calls[0][1])[0]).toMatchObject({
+            name: 'leave',
+            sentAt: Date.now(),
+        });
         expect(fetchSpy).not.toHaveBeenCalled();
 
         transport.stop();

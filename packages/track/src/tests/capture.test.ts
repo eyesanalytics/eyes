@@ -16,6 +16,10 @@ const makeConfig = (overrides?: Partial<ResolvedConfig>): ResolvedConfig => ({
     ...overrides,
 });
 
+const throwingTracker = (): void => {
+    throw new Error('tracker failed');
+};
+
 const makeTracker = () => ({
     page: vi.fn(),
     track: vi.fn(),
@@ -178,6 +182,24 @@ describe('capture', () => {
         cleanup();
     });
 
+    it('leaves the query and fragment out of an outbound url', () => {
+        const tracker = makeTracker();
+        const cleanup = initCapture(asTracker(tracker), makeConfig());
+
+        const link = document.createElement('a');
+        link.href = 'https://external-site.com/path?token=secret&email=a%40b.com#section';
+        document.body.appendChild(link);
+        link.addEventListener('click', e => e.preventDefault());
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+        expect(tracker.track).toHaveBeenCalledWith('Outbound Click', {
+            url: 'https://external-site.com/path',
+        });
+
+        document.body.removeChild(link);
+        cleanup();
+    });
+
     it('tracks a middle click on an outbound link once', () => {
         const tracker = makeTracker();
         const cleanup = initCapture(asTracker(tracker), makeConfig());
@@ -247,6 +269,63 @@ describe('capture', () => {
         expect(tracker.track).not.toHaveBeenCalled();
 
         document.body.removeChild(link);
+        cleanup();
+    });
+
+    it('runs the host pushState when the tracker throws', () => {
+        const tracker = makeTracker();
+        const cleanup = initCapture(asTracker(tracker), makeConfig());
+        tracker.page.mockClear().mockImplementation(throwingTracker);
+
+        expect(() => history.pushState(null, '', '/after-error')).not.toThrow();
+        expect(location.pathname).toBe('/after-error');
+        expect(tracker.page).toHaveBeenCalledOnce();
+
+        cleanup();
+    });
+
+    it('keeps tracker errors out of popstate, hashchange and pageshow', () => {
+        const tracker = makeTracker();
+        const onError = vi.fn();
+        window.addEventListener('error', onError);
+        const cleanup = initCapture(asTracker(tracker), makeConfig({ hashRouting: true }));
+        tracker.page.mockClear().mockImplementation(throwingTracker);
+
+        history.replaceState(null, '', '/popped');
+        expect(() => window.dispatchEvent(new PopStateEvent('popstate'))).not.toThrow();
+        history.replaceState(null, '', '/popped#section');
+        expect(() => window.dispatchEvent(new HashChangeEvent('hashchange'))).not.toThrow();
+        expect(() =>
+            window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })),
+        ).not.toThrow();
+
+        expect(tracker.page).toHaveBeenCalledTimes(3);
+        expect(onError).not.toHaveBeenCalled();
+
+        window.removeEventListener('error', onError);
+        cleanup();
+    });
+
+    it('keeps tracker errors out of an outbound click', () => {
+        const tracker = makeTracker();
+        const onError = vi.fn();
+        window.addEventListener('error', onError);
+        const cleanup = initCapture(asTracker(tracker), makeConfig());
+        tracker.track.mockImplementation(throwingTracker);
+
+        const link = document.createElement('a');
+        link.href = 'https://external-site.com/path';
+        document.body.appendChild(link);
+        link.addEventListener('click', e => e.preventDefault());
+
+        expect(() =>
+            link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })),
+        ).not.toThrow();
+        expect(tracker.track).toHaveBeenCalledOnce();
+        expect(onError).not.toHaveBeenCalled();
+
+        document.body.removeChild(link);
+        window.removeEventListener('error', onError);
         cleanup();
     });
 

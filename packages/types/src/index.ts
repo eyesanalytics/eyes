@@ -81,6 +81,12 @@ export type EyesEvent =
     | ConsentGrantedEvent
     | ConsentRevokedEvent;
 
+/**
+ * An event as the tracker sends it. `sentAt` is the browser clock (ms) at the moment its batch
+ * goes out, so the server can measure the browser's clock skew and correct `timestamp`.
+ */
+export type SentEvent = EyesEvent & { sentAt: number };
+
 /** Traits passed to `identify()`. `id` is the external user ID (required). */
 export interface IdentifyTraits {
     /** External user ID from your application (required). */

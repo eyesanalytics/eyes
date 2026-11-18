@@ -7,6 +7,21 @@ interface PrerenderingDocument extends Document {
 }
 
 /**
+ * Run the tracker's own work for a host navigation or a browser event. An error stays here: in a
+ * patched pushState it would break the host app's navigation, and in a listener it would land in
+ * the host app's error reporting.
+ */
+const guard =
+    <A extends unknown[]>(fn: (...args: A) => void) =>
+    (...args: A): void => {
+        try {
+            fn(...args);
+        } catch {
+            // The host app goes on without this event
+        }
+    };
+
+/**
  * Set up automatic tracking for:
  * - Initial pageview (handles prerendering)
  * - SPA navigation via pushState / popstate
@@ -35,10 +50,10 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
 
         if (prerenderingDocument.prerendering) {
             // Wait until the page is actually shown
-            const onActivate = () => {
+            const onActivate = guard(() => {
                 tracker.page();
                 document.removeEventListener('prerenderingchange', onActivate);
-            };
+            });
             document.addEventListener('prerenderingchange', onActivate);
             cleanups.push(() => document.removeEventListener('prerenderingchange', onActivate));
         }
@@ -65,11 +80,11 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
 
         // A back/forward cache restore shows the page again without running any script, so no
         // other listener sees it.
-        const onPageShow = (event: PageTransitionEvent) => {
+        const onPageShow = guard((event: PageTransitionEvent) => {
             if (!event.persisted) return;
             lastUrl = navigationKey();
             tracker.page();
-        };
+        });
         window.addEventListener('pageshow', onPageShow);
         cleanups.push(() => window.removeEventListener('pageshow', onPageShow));
 
@@ -81,12 +96,13 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
         }
     }
 
-    const onNavigation = (): void => {
+    // pushState, popstate and hashchange all come through here
+    const onNavigation = guard((): void => {
         const current = navigationKey();
         if (current === lastUrl) return;
         lastUrl = current;
         tracker.page();
-    };
+    });
 
     // -----------------------------------------------------------------
     // Outbound link tracking
@@ -95,22 +111,20 @@ const initCapture = (tracker: EyesTracker, config: ResolvedConfig): (() => void)
         // A primary click (also with ctrl or cmd) fires `click`; a middle click opens a new tab and
         // fires `auxclick`. Each event only counts its own button, so a browser that also fires
         // `click` for a middle click still counts it once.
-        const onClick = (e: MouseEvent) => {
+        const onClick = guard((e: MouseEvent) => {
             const button = e.type === 'auxclick' ? 1 : 0;
             if (e.button !== button) return;
 
             const link = (e.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null;
             if (!link) return;
 
-            try {
-                const url = new URL(link.href, location.origin);
-                if (url.host && url.host !== location.host) {
-                    tracker.track('Outbound Click', { url: link.href });
-                }
-            } catch {
-                // Malformed href, ignore
+            // A malformed href throws here, and the guard ignores it
+            const url = new URL(link.href, location.origin);
+            if (url.host && url.host !== location.host) {
+                // Links often carry tokens or emails in the query, and the report groups by page.
+                tracker.track('Outbound Click', { url: `${url.origin}${url.pathname}` });
             }
-        };
+        });
 
         document.addEventListener('click', onClick, { capture: true });
         document.addEventListener('auxclick', onClick, { capture: true });

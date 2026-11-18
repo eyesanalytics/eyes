@@ -49,6 +49,7 @@ describe('EyesProvider', () => {
         const { createEyes, EyesProvider } = await importModule();
         const { track } = createEyes();
 
+        // biome-ignore lint/correctness/noComponentHookFactories: the module is re-imported per test, so the component closes over it
         const ThankYouPage = () => {
             useEffect(() => {
                 track('Signup Completed', { plan: 'pro' });
@@ -84,6 +85,7 @@ describe('EyesProvider', () => {
     it('replays useEyes track and page calls in order', async () => {
         const { EyesProvider, useEyes } = await importModule();
 
+        // biome-ignore lint/correctness/noComponentHookFactories: the module is re-imported per test, so the component closes over it
         const Page = () => {
             const { track, page } = useEyes();
 

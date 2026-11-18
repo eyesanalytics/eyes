@@ -11,9 +11,9 @@
         "test": "pnpm -r test"
     },
     "devDependencies": {
-        "@biomejs/biome": "2.5.2",
+        "@biomejs/biome": "2.6.7",
         "biome-config-pixel": "^2.1.7",
         "typescript": "^7.0.2"
     },
-    "packageManager": "pnpm@10.33.0"
+    "packageManager": "pnpm@10.34.9"
 }

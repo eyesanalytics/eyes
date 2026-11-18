@@ -75,6 +75,7 @@ export const createEyes = <
     /**
      * Type-safe hook for accessing the Eyes tracker.
      */
+    // biome-ignore lint/correctness/noComponentHookFactories: createEyes() runs once at module scope, so the hook keeps one identity
     const useEyes = (): TypedEyesContextValue<TEvents> => {
         const ctx = useContext(EyesContext);
         return ctx as unknown as TypedEyesContextValue<TEvents>;

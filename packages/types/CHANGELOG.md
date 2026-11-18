@@ -1,5 +1,11 @@
 # eyes-types
 
+## 0.4.1
+
+### Patch Changes
+
+- 13c3517: Add the `SentEvent` type: a tracker event as it goes over the wire, with the `sentAt` browser time the tracker stamps on every event when its batch is sent, so the server can correct event timestamps for a browser clock that runs wrong.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -4,7 +4,8 @@ import { throttle } from '~/utils/throttle';
 
 /**
  * Count visitor input as session activity, so a visitor who keeps reading or scrolling stays in
- * one session while a tab left idle for 30 minutes starts a new one on its next interaction.
+ * one session while a tab left idle for 30 minutes starts a new one on its next interaction. The
+ * page's engagement carries that time to the server, so the visit outlasts this page load too.
  * Returns a cleanup function.
  */
 const initActivity = (): (() => void) => {

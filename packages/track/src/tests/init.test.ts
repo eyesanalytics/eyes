@@ -24,8 +24,6 @@ describe('init (integration)', () => {
         // Not a bot
         Object.defineProperty(navigator, 'webdriver', { value: false, configurable: true });
         vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 Normal Browser');
-
-        sessionStorage.clear();
     });
 
     afterEach(() => {
@@ -67,6 +65,25 @@ describe('init (integration)', () => {
         expect(signupEvent).toBeDefined();
         expect(signupEvent?.type).toBe('event');
         expect(signupEvent?.props).toEqual({ plan: 'pro' });
+
+        await api.shutdown();
+    });
+
+    it('sends track() and page() props within the limits of the ingress', async () => {
+        const { init } = await importModule();
+        const api = init(testEyesConfig({ autoPageview: false }));
+        const props = { plan: 'pro', tags: ['a', 'b'], note: 'x'.repeat(2000) } as never;
+
+        api.track('Signup', props);
+        api.page(props);
+        await api.flush();
+
+        const body: EyesEvent[] = fetchSpy.mock.calls.flatMap(([, options]) =>
+            JSON.parse(options.body),
+        );
+        const cleaned = { plan: 'pro', note: 'x'.repeat(1024) };
+        expect(body.find(event => event.type === 'event')?.props).toEqual(cleaned);
+        expect(body.find(event => event.type === 'pageview')?.props).toEqual(cleaned);
 
         await api.shutdown();
     });
@@ -144,6 +161,85 @@ describe('init (integration)', () => {
 
         // fetch should not be called because the queue is empty
         expect(fetchSpy).not.toHaveBeenCalled();
+
+        await api.shutdown();
+    });
+
+    it('drops an event whose beforeSend throws instead of throwing to the caller', async () => {
+        const { init } = await importModule();
+        const api = init(
+            testEyesConfig({
+                autoPageview: false,
+                beforeSend: () => {
+                    throw new Error('beforeSend failed');
+                },
+            }),
+        );
+
+        expect(() => api.track('Signup')).not.toThrow();
+        expect(() => api.page()).not.toThrow();
+        await api.flush();
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        await api.shutdown();
+    });
+
+    it('keeps the host navigation working when beforeSend throws', async () => {
+        const { init } = await importModule();
+        const originalHref = location.href;
+        let api: ReturnType<typeof init> | undefined;
+
+        expect(() => {
+            api = init(
+                testEyesConfig({
+                    beforeSend: () => {
+                        throw new Error('beforeSend failed');
+                    },
+                }),
+            );
+        }).not.toThrow();
+        expect(() => history.pushState(null, '', '/next-page')).not.toThrow();
+        expect(location.pathname).toBe('/next-page');
+
+        await api?.shutdown();
+        history.replaceState(null, '', originalHref);
+    });
+
+    it('sends automatic pageviews when autoPageview is passed as undefined', async () => {
+        const { init } = await importModule();
+        const api = init(testEyesConfig({ autoPageview: undefined }));
+        await api.flush();
+
+        const events: EyesEvent[] = fetchSpy.mock.calls.flatMap(call => JSON.parse(call[1].body));
+        expect(events.map(e => e.type)).toEqual(['pageview']);
+
+        await api.shutdown();
+    });
+
+    it('flushes on the default interval when flushInterval is passed as undefined', async () => {
+        const { init } = await importModule();
+        const api = init(testEyesConfig({ autoPageview: false, flushInterval: undefined }));
+
+        api.track('Queued');
+        await vi.advanceTimersByTimeAsync(4999);
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        await api.shutdown();
+    });
+
+    it('sends at most 50 events per request when maxBatchSize is larger', async () => {
+        const { init } = await importModule();
+        const api = init(testEyesConfig({ autoPageview: false, maxBatchSize: 100 }));
+
+        for (let i = 0; i < 100; i++) api.track(`Event ${i}`);
+        await api.flush();
+
+        const batches: EyesEvent[][] = fetchSpy.mock.calls.map(call => JSON.parse(call[1].body));
+        expect(batches.map(batch => batch.length)).toEqual([50, 50]);
 
         await api.shutdown();
     });

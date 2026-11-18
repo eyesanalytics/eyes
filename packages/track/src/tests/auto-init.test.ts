@@ -92,8 +92,6 @@ describe('auto-init (browser entry)', () => {
         // Not a bot
         Object.defineProperty(navigator, 'webdriver', { value: false, configurable: true });
         vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 Normal Browser');
-
-        sessionStorage.clear();
     });
 
     afterEach(() => {

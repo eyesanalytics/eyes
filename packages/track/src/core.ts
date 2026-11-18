@@ -6,8 +6,9 @@ import { type ConsentManager, createConsentManager } from '~/consent';
 import { buildContext, currentUrl } from '~/context';
 import { initEngagement } from '~/engagement';
 import { isOptedOut, optOutFromHash, setOptedOut } from '~/opt-out';
-import { getPageLoadId, getSessionId, touchSession } from '~/session';
+import { getPageLoadId, getSessionId, leaveVisit, touchSession } from '~/session';
 import { createTransport, type Transport } from '~/transport';
+import { cleanProps } from '~/utils/clean-props';
 import { createLogger, type Logger } from '~/utils/logger';
 import { initVitals } from '~/vitals';
 
@@ -18,6 +19,7 @@ class EyesTracker {
     private logger: Logger;
     private consentManager: ConsentManager;
     private cleanups: Array<() => void> = [];
+    private hadEyesId = false;
 
     constructor(options: EyesConfig) {
         this.config = resolveConfig(options);
@@ -58,6 +60,22 @@ class EyesTracker {
         this.transport.start();
     }
 
+    /**
+     * The eyes_id for an event, read before the event takes its session and page load id.
+     * Engagement, vitals and consent() read it too. Once the id has gone since the last event,
+     * because consent was withdrawn in another tab, the page leaves its visit first: that visit
+     * holds the visitor's identity, and cookieless events with its ids would put it back within
+     * reach of others on the same address. Nothing still pending can be filed on it then, for the
+     * same reason.
+     */
+    eventEyesId = (): string | undefined => {
+        const eyesId = this.consentManager.eyesId();
+        if (this.hadEyesId && !eyesId) leaveVisit(false);
+        this.hadEyesId = eyesId !== null;
+
+        return eyesId ?? undefined;
+    };
+
     /** Send a named custom event. */
     track = (name: string, props?: Props): void => {
         if (isOptedOut()) return;
@@ -68,11 +86,11 @@ class EyesTracker {
             name,
             url: context.url,
             referrer: context.referrer,
-            eyesId: this.consentManager.eyesId() ?? undefined,
+            eyesId: this.eventEyesId(),
             sessionId: touchSession(),
             pageLoadId: getPageLoadId(),
             timestamp: Date.now(),
-            props,
+            props: cleanProps(props, this.logger),
         };
 
         const result = this.config.beforeSend(event);
@@ -90,11 +108,11 @@ class EyesTracker {
             type: 'pageview',
             url: context.url,
             referrer: context.referrer,
-            eyesId: this.consentManager.eyesId() ?? undefined,
+            eyesId: this.eventEyesId(),
             sessionId: touchSession(),
             pageLoadId: getPageLoadId(),
             timestamp: Date.now(),
-            props,
+            props: cleanProps(props, this.logger),
         };
 
         const result = this.config.beforeSend(event);
@@ -115,9 +133,13 @@ class EyesTracker {
             return;
         }
 
-        const changed = this.consentManager.state() !== 'granted';
+        // Read first: when a withdrawal in another tab took the eyes_id, the page leaves the visit
+        // that held it before consent is given again. A granted state without its cookie is no
+        // consent, so this is a change: a new eyes_id is set and announced on the new visit.
+        const changed = this.eventEyesId() === undefined;
         this.consentManager.grant();
         const eyesId = this.consentManager.eyesId();
+        this.hadEyesId = eyesId !== null;
 
         // Only a change is sent, so the server records when consent was given
         if (changed && eyesId) {
@@ -126,27 +148,43 @@ class EyesTracker {
                 url: currentUrl(),
                 eyesId,
                 sessionId: getSessionId(),
+                pageLoadId: getPageLoadId(),
                 timestamp: Date.now(),
             };
             const result = this.config.beforeSend(event);
-            if (result) this.transport.enqueue(result);
+            if (result) {
+                this.transport.enqueue(result);
+                // Send it at once: it moves the visit to the eyes_id, where the next page looks.
+                this.transport.flush();
+            }
         }
 
         this.logger.info('Consent granted', { eyesId });
     };
 
-    /** Revoke consent: removes cookie, sends consent_revoked event. */
+    /**
+     * Revoke consent: removes the cookie and sends consent_revoked. The page leaves its visit at
+     * once, because that visit holds the visitor's identity and the cookieless events to come would
+     * put it back within reach of others on the same address.
+     */
     revokeConsent = (): void => {
         const eyesId = this.consentManager.eyesId();
 
-        // Send revocation event before clearing the ID
         if (eyesId) {
+            // The revocation carries the visit's ids, which the server finds the visit by
+            const sessionId = getSessionId();
+            const pageLoadId = getPageLoadId();
+
+            // The page's engagement and vitals are filed on the visit before the page leaves it
+            leaveVisit(true);
+            this.hadEyesId = false;
+
             const event: EyesEvent = {
                 type: 'consent_revoked',
                 url: currentUrl(),
                 eyesId,
-                sessionId: getSessionId(),
-                pageLoadId: getPageLoadId(),
+                sessionId,
+                pageLoadId,
                 timestamp: Date.now(),
             };
             const result = this.config.beforeSend(event);
@@ -158,13 +196,14 @@ class EyesTracker {
     };
 
     /**
-     * Opt this browser out: nothing is sent from now on. A visitor with an eyes_id goes through
-     * revokeConsent() first, so the server still gets the one event that erases their identity.
+     * Opt this browser out: nothing is sent from now on. A visitor with an eyes_id still goes
+     * through revokeConsent(), so the server gets the one event that erases their identity. The
+     * opt-out comes first, so the engagement and vitals it files on the visit are dropped.
      */
     optOut = (): void => {
         this.transport.clear();
-        this.revokeConsent();
         setOptedOut(true);
+        this.revokeConsent();
         this.transport.flush();
         this.logger.info('Opted out');
     };
@@ -207,16 +246,14 @@ class EyesTracker {
         this.logger.info('Identified', { eyesId, externalId: traits.id });
     };
 
-    /** Enqueue a pre-built event (used by internal modules). */
+    /**
+     * Enqueue a pre-built event (used by internal modules). They take its eyes_id from
+     * eventEyesId() before its session and page load id, like the active events do.
+     */
     send = (event: EyesEvent): void => {
         if (isOptedOut()) return;
 
-        // Attach eyesId to internally-generated events
-        const enriched: EyesEvent = {
-            ...event,
-            eyesId: event.eyesId ?? this.consentManager.eyesId() ?? undefined,
-        };
-        const result = this.config.beforeSend(enriched);
+        const result = this.config.beforeSend(event);
         if (result) this.transport.enqueue(result);
     };
 
