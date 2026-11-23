@@ -3,11 +3,11 @@
     "version": "0.1.0",
     "private": true,
     "description": "Eyes Analytics: lightweight client-side tracker",
-    "author": "Pixel Perfect Agency",
+    "author": "Pixel Perfect Agency B.V.",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/pixel-perfect-agency/eyes",
+        "url": "git+https://github.com/eyesanalytics/eyes.git",
         "directory": "packages/track"
     },
     "keywords": [

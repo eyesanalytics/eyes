@@ -1,5 +1,11 @@
 # eyes-types
 
+## 0.5.1
+
+### Patch Changes
+
+- b3aeeca: The source of the tracker and both SDKs is now public at [github.com/eyesanalytics/eyes](https://github.com/eyesanalytics/eyes), and the npm pages link to it. Every package also ships its MIT licence file, and `eyes-types` has a README.
+
 ## 0.5.0
 
 ## 0.4.1

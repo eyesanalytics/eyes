@@ -1,9 +1,14 @@
 {
     "name": "eyes-next",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Eyes Analytics: Next.js integration with automatic proxying",
-    "author": "Pixel Perfect Agency",
+    "author": "Pixel Perfect Agency B.V.",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/eyesanalytics/eyes.git",
+        "directory": "packages/eyes-next"
+    },
     "homepage": "https://eyes.dev",
     "bugs": {
         "email": "support@eyes.dev"

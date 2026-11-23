@@ -1,12 +1,12 @@
 {
     "name": "eyes-types",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Eyes Analytics: shared TypeScript types",
-    "author": "Pixel Perfect Agency",
+    "author": "Pixel Perfect Agency B.V.",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/pixel-perfect-agency/eyes",
+        "url": "git+https://github.com/eyesanalytics/eyes.git",
         "directory": "packages/types"
     },
     "keywords": [
